@@ -112,11 +112,12 @@ function App() {
   const [profile, setProfile] = useState<ShipProfile | null>(null)
   const [worldProfiles, setWorldProfiles] = useState<ShipProfile[]>([])
   const [selectedDeveloper, setSelectedDeveloper] = useState<ShipProfile | null>(null)
+  const [githubLogin, setGithubLogin] = useState<string | null>(null)
   const [selectedRepository, setSelectedRepository] = useState<RepositoryIsland | null>(null)
   const [status, setStatus] = useState('Digite um usuário público do GitHub para encontrar seu porto.')
   const [loading, setLoading] = useState(false)
-  const findDeveloper = useCallback(async (event: React.FormEvent) => {
-    event.preventDefault(); const login = username.trim().replace('@', ''); if (!login) return
+  const loadDeveloper = useCallback(async (rawLogin: string) => {
+    const login = rawLogin.trim().replace('@', ''); if (!login) return
     setLoading(true); setStatus('Mapeando o porto e contando as expedições do GitHub…')
     try {
       const developerResponse = await fetch(`http://localhost:3001/api/developers/${encodeURIComponent(login)}`)
@@ -130,10 +131,17 @@ function App() {
         setWorldProfiles(world.developers.map((developer) => createProfile(developer.user, developer.repositories, developer.world_position)))
       }
     } catch (error) { setStatus(error instanceof Error ? error.message : 'Não foi possível localizar esse dev.') } finally { setLoading(false) }
-  }, [username])
+  }, [])
+  const findDeveloper = useCallback((event: React.FormEvent) => { event.preventDefault(); void loadDeveloper(username) }, [loadDeveloper, username])
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const login = params.get('github')
+    if (login) { setUsername(login); setGithubLogin(login); void loadDeveloper(login); window.history.replaceState({}, '', window.location.pathname) }
+    void fetch('http://localhost:3001/api/auth/me').then((response) => response.json()).then((data: { user: { login: string } | null }) => { if (data.user) setGithubLogin(data.user.login) }).catch(() => undefined)
+  }, [loadDeveloper])
   const displayedProfile = selectedDeveloper ?? profile
   return <main className="app-shell"><div className="ocean"><Ocean profile={profile} worldProfiles={worldProfiles} onDeveloperClick={setSelectedDeveloper} onRepositoryClick={setSelectedRepository} /></div>
-    <header className="topbar"><a className="brand" href="/"><span>⚓</span> GitHub Ocean</a><span className="mode">MVP · Public profiles</span></header>
+    <header className="topbar"><a className="brand" href="/"><span>⚓</span> GitHub Ocean</a>{githubLogin ? <span className="mode">⚓ @{githubLogin}</span> : <a className="login" href="http://localhost:3001/api/auth/github">Entrar com GitHub</a>}</header>
     <section className={`search-card ${profile ? 'docked' : ''}`}><p className="eyebrow">EXPLORE THE DEVELOPER WORLD</p><h1>Encontre um barco pelo GitHub.</h1><form onSubmit={findDeveloper}><input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="ex.: lucasconstantino" aria-label="GitHub username" /><button disabled={loading}>{loading ? 'Navegando…' : 'Ir ao porto'}</button></form><p className="status">{status}</p></section>
     <aside className={`profile-card ${displayedProfile ? 'visible' : ''}`}>{displayedProfile && <><img src={displayedProfile.user.avatar_url} alt="" /><div><p className="eyebrow">{displayedProfile.shipClass.toUpperCase()}</p><h2>{displayedProfile.user.name ?? displayedProfile.user.login}</h2><a href={displayedProfile.user.html_url} target="_blank">@{displayedProfile.user.login} ↗</a></div><p className="bio">{displayedProfile.user.bio ?? 'Explorador das águas abertas do código.'}</p><div className="stats"><span><b>{displayedProfile.user.public_repos}</b> repos</span><span><b>{displayedProfile.stars}</b> stars</span><span><b>{displayedProfile.user.followers}</b> followers</span></div><div className="languages">{displayedProfile.languages.length ? displayedProfile.languages.map((language) => <span key={language.name} style={{ borderColor: language.color }}><i style={{ background: language.color }} />{language.name}</span>) : <span>Stack não identificada</span>}</div></>}</aside>
     <aside className={`repository-card ${selectedRepository ? 'visible' : ''}`}>{selectedRepository && <><button className="close" onClick={() => setSelectedRepository(null)} aria-label="Fechar">×</button><p className="eyebrow" style={{ color: selectedRepository.color }}>REPOSITORY ISLAND</p><h2>{selectedRepository.name}</h2><p>{selectedRepository.description ?? 'Uma ilha sem descrição, esperando por novos exploradores.'}</p><div className="repo-stats"><span>⌁ {selectedRepository.commit_count} commits</span><span>★ {selectedRepository.stargazers_count}</span><span>{selectedRepository.language ?? 'Code'}</span></div><a href={selectedRepository.html_url} target="_blank">Abrir no GitHub ↗</a></>}</aside>

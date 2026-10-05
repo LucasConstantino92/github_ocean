@@ -23,6 +23,15 @@ Abra o endereço mostrado pelo Vite e procure um usuário do GitHub. O comando i
 
 Copie `.env.example` para `.env` e preencha `GITHUB_TOKEN` com um fine-grained token sem permissões extras. Ele fica apenas na sua máquina e aumenta o limite da API. Sem token, o projeto ainda funciona dentro do limite público do GitHub.
 
+### Login com GitHub
+
+1. Em `https://github.com/settings/developers`, crie uma **OAuth App**.
+2. Use `GitHub Ocean Local` como nome e `http://localhost:3001/api/auth/callback` como **Authorization callback URL**.
+3. Copie o Client ID e gere um Client Secret.
+4. No `.env`, preencha `GITHUB_CLIENT_ID` e `GITHUB_CLIENT_SECRET`.
+
+Ao clicar em **Entrar com GitHub**, o backend realiza o OAuth e o navegador volta diretamente para o porto do usuário. O secret fica só no backend e o token não é exposto ao frontend.
+
 As oito ilhas mais relevantes recebem uma contagem de commits via API. Ela é cacheada por 15 minutos no servidor para reduzir chamadas. O tamanho visual da ilha combina commits, stars e forks, sempre com limite máximo para preservar o mapa.
 
 ### Mundo persistente local

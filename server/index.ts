@@ -3,6 +3,7 @@ import cors from 'cors'
 import express from 'express'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 
 type GitHubRepository = { name: string; full_name: string; html_url: string; description: string | null; language: string | null; stargazers_count: number; forks_count: number; updated_at: string }
 type CachedDeveloper = { expiresAt: number; value: unknown }
@@ -11,6 +12,8 @@ const app = express()
 const cache = new Map<string, CachedDeveloper>()
 const cacheTtlMs = 15 * 60 * 1000
 const githubHeaders = { Accept: 'application/vnd.github+json', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) }
+const oauthStates = new Map<string, number>()
+const sessions = new Map<string, { login: string; avatarUrl: string }>()
 mkdirSync('data', { recursive: true })
 const worldFile = join('data', 'world.json')
 type WorldPosition = [number, number]
@@ -35,6 +38,39 @@ function saveDeveloper(login: string, profile: unknown) {
 }
 
 app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173' }))
+
+app.get('/api/auth/github', (_request, response) => {
+  const clientId = process.env.GITHUB_CLIENT_ID
+  if (!clientId) return response.status(503).json({ message: 'Configure GITHUB_CLIENT_ID e GITHUB_CLIENT_SECRET no .env.' })
+  const state = randomBytes(24).toString('hex')
+  oauthStates.set(state, Date.now())
+  const redirectUri = `${process.env.API_ORIGIN ?? 'http://localhost:3001'}/api/auth/callback`
+  response.redirect(`https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read%3Auser&state=${state}`)
+})
+
+app.get('/api/auth/callback', async (request, response) => {
+  const { code, state } = request.query
+  if (typeof code !== 'string' || typeof state !== 'string' || !oauthStates.has(state) || Date.now() - (oauthStates.get(state) ?? 0) > 10 * 60 * 1000) return response.status(400).send('Login GitHub inválido ou expirado.')
+  oauthStates.delete(state)
+  try {
+    const tokenResponse = await fetch('https://github.com/login/oauth/access_token', { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code }) })
+    const tokenData = await tokenResponse.json() as { access_token?: string }
+    if (!tokenData.access_token) throw new Error('GitHub não retornou o token.')
+    const userResponse = await fetch('https://api.github.com/user', { headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${tokenData.access_token}` } })
+    if (!userResponse.ok) throw new Error('Não foi possível ler o perfil GitHub.')
+    const user = await userResponse.json() as { login: string; avatar_url: string }
+    const session = randomBytes(32).toString('hex')
+    sessions.set(session, { login: user.login, avatarUrl: user.avatar_url })
+    response.setHeader('Set-Cookie', `github_ocean_session=${session}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`)
+    response.redirect(`${process.env.WEB_ORIGIN ?? 'http://localhost:5173'}?github=${encodeURIComponent(user.login)}`)
+  } catch (error) { response.status(502).send(error instanceof Error ? error.message : 'Falha ao entrar com GitHub.') }
+})
+
+app.get('/api/auth/me', (request, response) => {
+  const session = request.headers.cookie?.match(/github_ocean_session=([^;]+)/)?.[1]
+  const user = session ? sessions.get(session) : undefined
+  response.json({ user: user ?? null })
+})
 
 app.get('/api/world', (_request, response) => {
   response.json({ developers: readWorld().slice(0, 40).map((developer, index) => ({ ...developer.profile as object, world_position: developer.position ?? [index * 22, 0] })) })

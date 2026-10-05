@@ -3,3 +3,4 @@
 .search-card.docked .eyebrow { font-size: 8px; margin-bottom: 7px; }
 .search-card.docked .status { font-size: 11px; margin: 8px 2px 0; }
 @media (max-width: 640px) { .search-card.docked { left: 16px; top: 70px; width: calc(100% - 32px); } }
+.login { background: rgba(224, 169, 91, .95); border-radius: 8px; color: #17212e; font-size: 12px; font-weight: 700; padding: 9px 12px; pointer-events: auto; text-decoration: none; }
