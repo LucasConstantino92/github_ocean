@@ -17,7 +17,30 @@ npm install
 npm run dev
 ```
 
-Abra o endereço mostrado pelo Vite e procure um usuário do GitHub.
+Abra o endereço mostrado pelo Vite e procure um usuário do GitHub. O comando inicia o frontend e a API Node juntos.
+
+### Token do GitHub (recomendado)
+
+Copie `.env.example` para `.env` e preencha `GITHUB_TOKEN` com um fine-grained token sem permissões extras. Ele fica apenas na sua máquina e aumenta o limite da API. Sem token, o projeto ainda funciona dentro do limite público do GitHub.
+
+As oito ilhas mais relevantes recebem uma contagem de commits via API. Ela é cacheada por 15 minutos no servidor para reduzir chamadas. O tamanho visual da ilha combina commits, stars e forks, sempre com limite máximo para preservar o mapa.
+
+### Mundo persistente local
+
+Cada perfil pesquisado entra no registro local `data/world.json` e passa a aparecer como um barco clicável nas próximas explorações. Esse arquivo não entra no Git; ao hospedar a API, a mesma estrutura pode usar um banco compartilhado para formar o oceano público.
+
+### Ilha-porto do desenvolvedor
+
+Cada desenvolvedor agora possui somente uma ilha-porto. Ela aumenta conforme commits, repositórios e stars; os repositórios alimentam o progresso do território em vez de criarem ilhas aleatórias. O visual evolui de acampamento para vila, loja e forte — a base para futuras personalizações e exploração marítima.
+
+| Nível | Evolução | Critério visual |
+| --- | --- | --- |
+| 1 | Acampamento | Ilha pequena e primeiro repositório como construção |
+| 2 | Assentamento | Segunda construção vinculada ao segundo repositório |
+| 3 | Vila comercial | Terceiro repositório ganha uma loja/oficina |
+| 4 | Porto fortificado | Quarto repositório vira a torre/forte da ilha |
+
+O nível e o tamanho usam uma pontuação limitada de commits, stars e quantidade de repositórios. Cada construção pode ser clicada para abrir o repositório que a representa. As posições dos portos são reservadas pelo backend em uma malha de 22 unidades, evitando colisões entre ilhas.
 
 ## Próxima evolução planejada
 
