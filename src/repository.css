@@ -1,0 +1,9 @@
+.repository-card { background: rgba(4, 24, 41, .9); border: 1px solid rgba(173, 224, 239, .23); backdrop-filter: blur(14px); border-radius: 16px; box-shadow: 0 20px 50px rgba(0, 0, 0, .28); max-width: 320px; opacity: 0; padding: 18px; pointer-events: none; position: absolute; right: 34px; top: 105px; transform: translateX(25px); transition: .35s ease; z-index: 1; }
+.repository-card.visible { opacity: 1; pointer-events: auto; transform: none; }
+.repository-card h2 { font-size: 20px; letter-spacing: -.4px; margin: 3px 25px 9px 0; }
+.repository-card p:not(.eyebrow) { color: #c6d8df; font-size: 13px; line-height: 1.4; margin: 0; }
+.repository-card > a { color: #91d9ef; display: inline-block; font-size: 13px; margin-top: 16px; text-decoration: none; }
+.close { background: transparent; border: 0; color: #d3e8ef; cursor: pointer; font-size: 24px; line-height: 1; position: absolute; right: 13px; top: 13px; }
+.repo-stats { border-block: 1px solid rgba(173, 224, 239, .15); color: #a9c9d5; display: flex; gap: 14px; font-family: 'DM Mono', monospace; font-size: 11px; margin-top: 14px; padding: 10px 0; }
+.repository-card .eyebrow { font-size: 8px; margin-bottom: 2px; }
+@media (max-width: 640px) { .repository-card { left: 16px; max-width: calc(100% - 32px); right: auto; top: 92px; } }
