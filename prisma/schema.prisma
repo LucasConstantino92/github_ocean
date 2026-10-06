@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Developer {
+  id          String       @id @default(cuid())
+  githubLogin String       @unique
+  name        String?
+  avatarUrl   String
+  bio         String?
+  publicRepos Int
+  followers   Int
+  stars       Int          @default(0)
+  forks       Int          @default(0)
+  languages   Json
+  syncedAt    DateTime     @updatedAt
+  createdAt   DateTime     @default(now())
+  port        Port?
+  repositories Repository[]
+}
+
+model Port {
+  id           String    @id @default(cuid())
+  developerId  String    @unique
+  worldX       Int
+  worldZ       Int
+  islandSize   Float
+  islandLevel  Int
+  totalCommits Int
+  shipClass    String
+  updatedAt    DateTime  @updatedAt
+  developer    Developer @relation(fields: [developerId], references: [id], onDelete: Cascade)
+
+  @@unique([worldX, worldZ])
+}
+
+model Repository {
+  id          String    @id @default(cuid())
+  developerId String
+  githubUrl   String    @unique
+  name        String
+  fullName    String
+  description String?
+  language    String?
+  stars       Int
+  forks       Int
+  commits     Int       @default(0)
+  updatedAt   DateTime
+  developer   Developer @relation(fields: [developerId], references: [id], onDelete: Cascade)
+
+  @@index([developerId])
+}

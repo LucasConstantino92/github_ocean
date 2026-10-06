@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: github-ocean-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: github_ocean
+      POSTGRES_USER: github_ocean
+      POSTGRES_PASSWORD: github_ocean_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

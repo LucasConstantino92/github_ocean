@@ -1,6 +1,7 @@
-.search-card.docked { background: rgba(4, 24, 41, .76); border: 1px solid rgba(173, 224, 239, .23); border-radius: 15px; box-shadow: 0 16px 50px rgba(0, 0, 0, .25); margin: 0; padding: 14px; position: fixed; left: 34px; text-align: left; top: 84px; width: min(400px, calc(100% - 68px)); }
+.search-card.docked { background: rgba(4, 24, 41, .76); border: 1px solid rgba(173, 224, 239, .23); border-radius: 15px; box-shadow: 0 16px 50px rgba(0, 0, 0, .25); margin: 0; padding: 14px; position: fixed; left: 50%; text-align: left; top: 16px; transform: translateX(-50%); width: min(480px, calc(100% - 68px)); }
 .search-card.docked h1 { display: none; }
 .search-card.docked .eyebrow { font-size: 8px; margin-bottom: 7px; }
 .search-card.docked .status { font-size: 11px; margin: 8px 2px 0; }
-@media (max-width: 640px) { .search-card.docked { left: 16px; top: 70px; width: calc(100% - 32px); } }
+.profile-card { bottom: auto; position: fixed; top: 96px; }
+@media (max-width: 640px) { .search-card.docked { left: 50%; top: 62px; width: calc(100% - 32px); } }
 .login { background: rgba(224, 169, 91, .95); border-radius: 8px; color: #17212e; font-size: 12px; font-weight: 700; padding: 9px 12px; pointer-events: auto; text-decoration: none; }

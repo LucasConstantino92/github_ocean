@@ -4,15 +4,22 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n web,api -c cyan,green \"vite\" \"tsx watch server/index.ts\"",
+    "dev": "concurrently -n web,api,indexer -c cyan,green,magenta \"vite\" \"tsx watch server/index.ts\" \"tsx server/workers/continuous-indexer.ts\"",
     "dev:web": "vite",
     "dev:api": "tsx watch server/index.ts",
     "check:api": "tsc --noEmit -p server/tsconfig.json",
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "worker:discover": "tsx server/workers/discover.ts",
+    "world:index": "tsx server/workers/continuous-indexer.ts",
+    "world:relayout": "tsx server/workers/relayout.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@prisma/client": "^6.16.3",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.1",
     "cors": "^2.8.6",
@@ -31,6 +38,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "oxlint": "^1.81.0",
+    "prisma": "^6.16.3",
     "tsx": "^4.23.15",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
