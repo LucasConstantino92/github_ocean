@@ -9,6 +9,8 @@ type WorldRepository = GitHubRepository & { commit_count: number }
 type WorldProfile = { user: { login: string; name: string | null; avatar_url: string; bio: string | null; public_repos: number; followers: number }; repositories: WorldRepository[]; cached: boolean }
 type GitHubNeighbor = { login: string; avatar_url: string; html_url: string }
 type CachedDeveloper = { expiresAt: number; value: WorldProfile & { world_position: WorldPosition } }
+type StoredRepository = { name: string; fullName: string; githubUrl: string; description: string | null; language: string | null; stars: number; forks: number; commits: number; updatedAt: Date }
+type StoredDeveloper = { githubLogin: string; name: string | null; avatarUrl: string; bio: string | null; publicRepos: number; followers: number; port: { worldX: number; worldZ: number } | null; repositories: StoredRepository[] }
 
 const app = express()
 const cache = new Map<string, CachedDeveloper>()
@@ -19,19 +21,39 @@ const sessions = new Map<string, { login: string; avatarUrl: string }>()
 const prisma = new PrismaClient()
 type WorldPosition = [number, number]
 const positionHash = (value: string, salt = 0) => [...value].reduce((result, char) => (result * 31 + char.charCodeAt(0) + salt) >>> 0, 7 + salt)
+function fallbackPosition(login: string): WorldPosition {
+  const seed = positionHash(login)
+  const radius = 18 + seed % 52
+  const angle = ((seed >>> 8) % 3600) / 3600 * Math.PI * 2
+  return [Math.round(Math.cos(angle) * radius), Math.round(Math.sin(angle) * radius)]
+}
 async function availablePosition(login: string): Promise<WorldPosition> {
   const ports = await prisma.port.findMany({ select: { worldX: true, worldZ: true } })
   const spacing = 15
   for (let attempt = 0; attempt < 6000; attempt++) {
     const xSeed = positionHash(login, attempt * 17 + 11)
     const zSeed = positionHash(login, attempt * 29 + 23)
-    const radius = 1 + (xSeed % 6)
+    // The first ports stay close together, then new discoveries expand into
+    // further ocean rings. This keeps positions permanent without making the
+    // indexed world end after the first few chunks.
+    const radius = 1 + Math.floor(attempt / 24) + (xSeed % 6)
     const angle = (zSeed % 3600) / 3600 * Math.PI * 2
     const x = Math.round((Math.cos(angle) * radius + ((xSeed >>> 8) % 3 - 1) * .28) * spacing)
     const z = Math.round((Math.sin(angle) * radius + ((zSeed >>> 12) % 3 - 1) * .28) * spacing)
     if (ports.every((port) => Math.hypot(port.worldX - x, port.worldZ - z) >= 12)) return [x, z]
   }
   throw new Error('Não foi possível reservar uma posição no oceano.')
+}
+
+function toWorldDeveloper(developer: StoredDeveloper) {
+  const repositories = [...developer.repositories]
+    .sort((a, b) => b.stars - a.stars || b.updatedAt.getTime() - a.updatedAt.getTime())
+    .slice(0, 8)
+  return {
+    user: { login: developer.githubLogin, name: developer.name, avatar_url: developer.avatarUrl, bio: developer.bio, public_repos: developer.publicRepos, followers: developer.followers },
+    repositories: repositories.map((repository) => ({ name: repository.name, full_name: repository.fullName, html_url: repository.githubUrl, description: repository.description, language: repository.language, stargazers_count: repository.stars, forks_count: repository.forks, updated_at: repository.updatedAt.toISOString(), commit_count: repository.commits })),
+    world_position: [developer.port?.worldX ?? 0, developer.port?.worldZ ?? 0] as WorldPosition,
+  }
 }
 async function saveDeveloper(profile: WorldProfile) {
   const { user, repositories } = profile
@@ -104,16 +126,23 @@ app.get('/api/auth/me', (request, response) => {
 })
 
 app.get('/api/world', async (_request, response) => {
-  const developers = await prisma.developer.findMany({ include: { port: true, repositories: true }, orderBy: { syncedAt: 'desc' }, take: 120 })
-  response.json({ developers: developers.map((developer) => ({ user: { login: developer.githubLogin, name: developer.name, avatar_url: developer.avatarUrl, bio: developer.bio, public_repos: developer.publicRepos, followers: developer.followers }, repositories: developer.repositories.map((repository) => ({ name: repository.name, full_name: repository.fullName, html_url: repository.githubUrl, description: repository.description, language: repository.language, stargazers_count: repository.stars, forks_count: repository.forks, updated_at: repository.updatedAt.toISOString(), commit_count: repository.commits })), world_position: [developer.port?.worldX ?? 0, developer.port?.worldZ ?? 0] })) })
+  try {
+    const developers = await prisma.developer.findMany({ include: { port: true, repositories: true }, orderBy: { syncedAt: 'desc' }, take: 120 })
+    response.json({ developers: developers.map(toWorldDeveloper) })
+  } catch { response.json({ developers: [], degraded: true }) }
 })
 
 app.get('/api/world/chunks/:x/:z', async (request, response) => {
   const chunkSize = 88
-  const x = Number(request.params.x) * chunkSize
-  const z = Number(request.params.z) * chunkSize
-  const ports = await prisma.port.findMany({ where: { worldX: { gte: x, lt: x + chunkSize }, worldZ: { gte: z, lt: z + chunkSize } }, include: { developer: { include: { repositories: true } } } })
-  response.json({ chunk: [Number(request.params.x), Number(request.params.z)], ports: ports.map((port) => ({ login: port.developer.githubLogin, position: [port.worldX, port.worldZ], island: { size: port.islandSize, level: port.islandLevel }, repositories: port.developer.repositories.length })) })
+  const chunkX = Number(request.params.x)
+  const chunkZ = Number(request.params.z)
+  if (!Number.isInteger(chunkX) || !Number.isInteger(chunkZ)) return response.status(400).json({ message: 'Coordenadas de região inválidas.' })
+  const x = chunkX * chunkSize
+  const z = chunkZ * chunkSize
+  try {
+    const ports = await prisma.port.findMany({ where: { worldX: { gte: x, lt: x + chunkSize }, worldZ: { gte: z, lt: z + chunkSize } }, include: { developer: { include: { repositories: true } } } })
+    response.json({ chunk: [chunkX, chunkZ], developers: ports.map((port) => toWorldDeveloper({ ...port.developer, port })) })
+  } catch { response.json({ chunk: [chunkX, chunkZ], developers: [], degraded: true }) }
 })
 
 async function github(path: string) {
@@ -142,8 +171,9 @@ app.get('/api/developers/:username', async (request, response) => {
     const commitCounts = await Promise.all(relevantRepositories.map(async (repository) => [repository.html_url, await getCommitCount(repository)] as const))
     const commitsByUrl = new Map(commitCounts)
     const baseValue = { user, repositories: repositories.map((repository) => ({ ...repository, commit_count: commitsByUrl.get(repository.html_url) ?? 0 })), cached: false }
-    const position = await saveDeveloper(baseValue)
-    await discoverNeighbors(user.login)
+    let position: WorldPosition
+    try { position = await saveDeveloper(baseValue); void discoverNeighbors(user.login) }
+    catch { position = fallbackPosition(user.login) }
     const value = { ...baseValue, world_position: position }
     cache.set(username, { value, expiresAt: Date.now() + cacheTtlMs })
     response.json(value)

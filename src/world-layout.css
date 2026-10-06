@@ -5,3 +5,14 @@
 .profile-card { bottom: auto; position: fixed; top: 96px; }
 @media (max-width: 640px) { .search-card.docked { left: 50%; top: 62px; width: calc(100% - 32px); } }
 .login { background: rgba(224, 169, 91, .95); border-radius: 8px; color: #17212e; font-size: 12px; font-weight: 700; padding: 9px 12px; pointer-events: auto; text-decoration: none; }
+.sound { background: rgba(4, 24, 41, .82); border: 1px solid rgba(173, 224, 239, .27); border-radius: 8px; color: #91b8c7; cursor: pointer; font-family: 'DM Mono', monospace; font-size: 10px; padding: 9px 10px; }
+.sound.active { border-color: rgba(107, 199, 230, .72); color: #b9efff; box-shadow: 0 0 18px rgba(65, 184, 220, .18); }
+.minimap { background: rgba(4, 24, 41, .78); border: 1px solid rgba(173, 224, 239, .24); border-radius: 50%; bottom: 62px; box-shadow: 0 12px 36px rgba(0, 0, 0, .3); height: 132px; padding: 9px; position: fixed; right: 28px; width: 132px; z-index: 2; }
+.map-ring { background: radial-gradient(circle, rgba(24, 105, 137, .34), rgba(4, 30, 50, .78) 68%); border: 1px solid rgba(139, 207, 229, .3); border-radius: 50%; height: 100%; overflow: hidden; position: relative; width: 100%; }
+.map-ring::before,.map-ring::after { background: rgba(139, 207, 229, .12); content: ''; left: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%); }
+.map-ring::before { height: 1px; width: 100%; }.map-ring::after { height: 100%; width: 1px; }
+.compass { color: #d9eff5; font-family: 'DM Mono', monospace; font-size: 9px; left: 50%; position: absolute; top: -17px; transform: translateX(-50%); }
+.map-port { background: #6daf66; border: 1px solid #d8edc0; border-radius: 50%; box-shadow: 0 0 6px rgba(109, 175, 102, .7); cursor: pointer; height: 7px; padding: 0; position: absolute; transform: translate(-50%, -50%); width: 7px; z-index: 2; }
+.map-player { background: #f0b65f; border: 2px solid #fff1cf; border-radius: 50% 50% 50% 0; box-shadow: 0 0 8px rgba(240, 182, 95, .8); height: 9px; left: 50%; position: absolute; top: 50%; transform: translate(-50%, -50%) rotate(-45deg); width: 9px; z-index: 3; }
+.map-label { bottom: -22px; color: #83adbd; font-family: 'DM Mono', monospace; font-size: 7px; left: 50%; letter-spacing: 1.2px; position: absolute; transform: translateX(-50%); white-space: nowrap; }
+@media (max-width: 760px) { .minimap { bottom: 72px; height: 96px; right: 16px; width: 96px; }.sound { display: none; } }
