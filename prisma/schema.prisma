@@ -55,3 +55,23 @@ model Repository {
 
   @@index([developerId])
 }
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  type        String
+  anonymousId String?
+  githubLogin String?
+  path        String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([anonymousId, createdAt])
+  @@index([githubLogin, createdAt])
+}
+
+model IndexerState {
+  key       String   @id
+  cursor    Int      @default(0)
+  updatedAt DateTime @updatedAt
+}

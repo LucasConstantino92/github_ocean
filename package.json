@@ -10,18 +10,24 @@
     "check:api": "tsc --noEmit -p server/tsconfig.json",
     "db:up": "docker compose up -d postgres",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
     "worker:discover": "tsx server/workers/discover.ts",
     "world:index": "tsx server/workers/continuous-indexer.ts",
     "world:relayout": "tsx server/workers/relayout.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "prisma generate"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@prisma/client": "^6.16.3",
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.1",
+    "@vercel/analytics": "^2.0.1",
     "cors": "^2.8.6",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",

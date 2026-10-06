@@ -3,6 +3,7 @@ import cors from 'cors'
 import express from 'express'
 import { randomBytes } from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
+import { cookie, readCookie, sameValue, signToken, verifyToken } from './security.js'
 
 type GitHubRepository = { name: string; full_name: string; html_url: string; description: string | null; language: string | null; stargazers_count: number; forks_count: number; updated_at: string }
 type WorldRepository = GitHubRepository & { commit_count: number }
@@ -11,14 +12,48 @@ type GitHubNeighbor = { login: string; avatar_url: string; html_url: string }
 type CachedDeveloper = { expiresAt: number; value: WorldProfile & { world_position: WorldPosition } }
 type StoredRepository = { name: string; fullName: string; githubUrl: string; description: string | null; language: string | null; stars: number; forks: number; commits: number; updatedAt: Date }
 type StoredDeveloper = { githubLogin: string; name: string | null; avatarUrl: string; bio: string | null; publicRepos: number; followers: number; port: { worldX: number; worldZ: number } | null; repositories: StoredRepository[] }
+type SessionPayload = { login: string; avatarUrl: string; exp: number }
+type OAuthStatePayload = { nonce: string; exp: number }
+type AnalyticsEventType = 'app_opened' | 'developer_searched' | 'developer_loaded' | 'repository_opened' | 'login_started' | 'login_succeeded'
+
+type AnalyticsEventRecord = {
+  id: string
+  type: string
+  anonymousId?: string | null
+  githubLogin?: string | null
+  path?: string | null
+  metadata?: unknown
+  createdAt: Date
+}
+
+type IndexerStateRecord = {
+  key: string
+  cursor: number
+  updatedAt: Date
+}
+
+type AnalyticsEventDelegate = {
+  create: (args: { data: { type: string; anonymousId?: string; githubLogin?: string; path?: string; metadata?: Record<string, string | number | boolean> } }) => Promise<AnalyticsEventRecord>
+  groupBy: (args: { by: string[]; where?: Record<string, unknown>; _count?: { _all: boolean } }) => Promise<Array<{ type: string; _count: { _all: number } }>>
+  findMany: (args?: { where?: Record<string, unknown>; distinct?: string[]; select?: Record<string, boolean> }) => Promise<Array<Partial<AnalyticsEventRecord>>>
+}
+
+type IndexerStateDelegate = {
+  upsert: (args: { where: { key: string }; create: { key: string }; update: Record<string, unknown> }) => Promise<IndexerStateRecord>
+  update: (args: { where: { key: string }; data: { cursor: number } }) => Promise<IndexerStateRecord>
+}
+
+type ExtendedPrismaClient = PrismaClient & {
+  analyticsEvent: AnalyticsEventDelegate
+  indexerState: IndexerStateDelegate
+}
 
 const app = express()
 const cache = new Map<string, CachedDeveloper>()
 const cacheTtlMs = 15 * 60 * 1000
 const githubHeaders: Record<string, string> = { Accept: 'application/vnd.github+json', 'User-Agent': 'github-ocean', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) }
-const oauthStates = new Map<string, number>()
-const sessions = new Map<string, { login: string; avatarUrl: string }>()
-const prisma = new PrismaClient()
+const prisma = new PrismaClient() as unknown as ExtendedPrismaClient
+const analyticsEventTypes = new Set<AnalyticsEventType>(['app_opened', 'developer_searched', 'developer_loaded', 'repository_opened', 'login_started', 'login_succeeded'])
 type WorldPosition = [number, number]
 const positionHash = (value: string, salt = 0) => [...value].reduce((result, char) => (result * 31 + char.charCodeAt(0) + salt) >>> 0, 7 + salt)
 function fallbackPosition(login: string): WorldPosition {
@@ -90,21 +125,65 @@ async function discoverNeighbors(username: string) {
   } catch { /* Descoberta é complementar; o perfil principal continua funcionando. */ }
 }
 
-app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173' }))
+function currentSession(cookieHeader: string | undefined) {
+  return verifyToken<SessionPayload>(readCookie(cookieHeader, 'github_ocean_session'))
+}
 
-app.get('/api/auth/github', (_request, response) => {
+async function recordEvent(type: AnalyticsEventType, details: { anonymousId?: string; githubLogin?: string; path?: string; metadata?: Record<string, string | number | boolean> } = {}) {
+  try {
+    await prisma.analyticsEvent.create({ data: { type, anonymousId: details.anonymousId, githubLogin: details.githubLogin?.toLowerCase(), path: details.path, metadata: details.metadata } })
+  } catch (error) {
+    console.warn(`Analytics indisponível para ${type}.`, error)
+  }
+}
+
+app.set('trust proxy', 1)
+app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173', credentials: true }))
+app.use(express.json({ limit: '16kb' }))
+
+app.get('/api/health', (_request, response) => response.json({ ok: true }))
+
+app.post('/api/analytics/events', async (request, response) => {
+  const { type, anonymousId, path, metadata } = request.body as { type?: string; anonymousId?: string; path?: string; metadata?: unknown }
+  if (!type || !analyticsEventTypes.has(type as AnalyticsEventType) || type.startsWith('login_')) return response.status(400).json({ message: 'Evento inválido.' })
+  if (anonymousId && (typeof anonymousId !== 'string' || anonymousId.length > 80)) return response.status(400).json({ message: 'Identificador inválido.' })
+  const cleanMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? Object.fromEntries(Object.entries(metadata).slice(0, 8).filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value)).map(([key, value]) => [key.slice(0, 40), typeof value === 'string' ? value.slice(0, 160) : value])) as Record<string, string | number | boolean>
+    : undefined
+  const session = currentSession(request.headers.cookie)
+  await recordEvent(type as AnalyticsEventType, { anonymousId, githubLogin: session?.login, path: typeof path === 'string' ? path.slice(0, 200) : undefined, metadata: cleanMetadata })
+  response.status(202).json({ accepted: true })
+})
+
+app.get('/api/analytics/summary', async (request, response) => {
+  const secret = process.env.ANALYTICS_SECRET
+  if (!secret) return response.status(503).json({ message: 'ANALYTICS_SECRET não configurado.' })
+  const authorization = request.headers.authorization
+  if (!authorization?.startsWith('Bearer ') || !sameValue(authorization.slice(7), secret)) return response.status(401).json({ message: 'Não autorizado.' })
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const where = { createdAt: { gte: since } }
+  const [events, visitors, loggedUsers] = await Promise.all([
+    prisma.analyticsEvent.groupBy({ by: ['type'], where, _count: { _all: true } }),
+    prisma.analyticsEvent.findMany({ where: { ...where, anonymousId: { not: null } }, distinct: ['anonymousId'], select: { anonymousId: true } }),
+    prisma.analyticsEvent.findMany({ where: { ...where, type: 'login_succeeded', githubLogin: { not: null } }, distinct: ['githubLogin'], select: { githubLogin: true } }),
+  ])
+  response.json({ periodDays: 30, uniqueVisitors: visitors.length, uniqueLoggedUsers: loggedUsers.length, events: Object.fromEntries(events.map((event) => [event.type, event._count?._all ?? 0])) })
+})
+
+app.get('/api/auth/github', async (request, response) => {
   const clientId = process.env.GITHUB_CLIENT_ID
   if (!clientId) return response.status(503).json({ message: 'Configure GITHUB_CLIENT_ID e GITHUB_CLIENT_SECRET no .env.' })
-  const state = randomBytes(24).toString('hex')
-  oauthStates.set(state, Date.now())
+  const state = signToken<OAuthStatePayload>({ nonce: randomBytes(24).toString('hex'), exp: Date.now() + 10 * 60 * 1000 })
+  response.setHeader('Set-Cookie', cookie('github_ocean_oauth_state', state, 10 * 60))
+  await recordEvent('login_started', { path: request.path })
   const redirectUri = `${process.env.API_ORIGIN ?? 'http://localhost:3001'}/api/auth/callback`
   response.redirect(`https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read%3Auser&state=${state}`)
 })
 
 app.get('/api/auth/callback', async (request, response) => {
   const { code, state } = request.query
-  if (typeof code !== 'string' || typeof state !== 'string' || !oauthStates.has(state) || Date.now() - (oauthStates.get(state) ?? 0) > 10 * 60 * 1000) return response.status(400).send('Login GitHub inválido ou expirado.')
-  oauthStates.delete(state)
+  const stateCookie = readCookie(request.headers.cookie, 'github_ocean_oauth_state')
+  if (typeof code !== 'string' || typeof state !== 'string' || !stateCookie || !sameValue(state, stateCookie) || !verifyToken<OAuthStatePayload>(state)) return response.status(400).send('Login GitHub inválido ou expirado.')
   try {
     const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
@@ -125,9 +204,9 @@ app.get('/api/auth/callback', async (request, response) => {
       throw new Error(`Não foi possível ler o perfil GitHub (${userResponse.status}).`)
     }
     const user = await userResponse.json() as { login: string; avatar_url: string }
-    const session = randomBytes(32).toString('hex')
-    sessions.set(session, { login: user.login, avatarUrl: user.avatar_url })
-    response.setHeader('Set-Cookie', `github_ocean_session=${session}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`)
+    const session = signToken<SessionPayload>({ login: user.login, avatarUrl: user.avatar_url, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 })
+    response.setHeader('Set-Cookie', [cookie('github_ocean_oauth_state', '', 0), cookie('github_ocean_session', session, 7 * 24 * 60 * 60)])
+    await recordEvent('login_succeeded', { githubLogin: user.login, path: request.path })
     response.redirect(`${process.env.WEB_ORIGIN ?? 'http://localhost:5173'}?github=${encodeURIComponent(user.login)}`)
   } catch (error) {
     console.error('Falha ao entrar com GitHub:', error)
@@ -136,9 +215,8 @@ app.get('/api/auth/callback', async (request, response) => {
 })
 
 app.get('/api/auth/me', (request, response) => {
-  const session = request.headers.cookie?.match(/github_ocean_session=([^;]+)/)?.[1]
-  const user = session ? sessions.get(session) : undefined
-  response.json({ user: user ?? null })
+  const session = currentSession(request.headers.cookie)
+  response.json({ user: session ? { login: session.login, avatarUrl: session.avatarUrl } : null })
 })
 
 app.get('/api/world', async (_request, response) => {
@@ -180,25 +258,72 @@ async function getCommitCount(repository: GitHubRepository) {
   } catch { return 0 }
 }
 
+async function syncDeveloper(username: string, discover = true) {
+  const normalizedUsername = username.replace('@', '').toLowerCase()
+  const cached = cache.get(normalizedUsername)
+  if (cached && cached.expiresAt > Date.now()) return { ...cached.value, cached: true }
+  const [userResponse, reposResponse] = await Promise.all([github(`/users/${encodeURIComponent(normalizedUsername)}`), github(`/users/${encodeURIComponent(normalizedUsername)}/repos?per_page=100&sort=updated`)])
+  const user = await userResponse.json()
+  const repositories = await reposResponse.json() as GitHubRepository[]
+  const relevantRepositories = [...repositories].sort((a, b) => b.stargazers_count - a.stargazers_count || Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 8)
+  const commitCounts = await Promise.all(relevantRepositories.map(async (repository) => [repository.html_url, await getCommitCount(repository)] as const))
+  const commitsByUrl = new Map(commitCounts)
+  const baseValue = { user, repositories: repositories.map((repository) => ({ ...repository, commit_count: commitsByUrl.get(repository.html_url) ?? 0 })), cached: false }
+  let position: WorldPosition
+  try {
+    position = await saveDeveloper(baseValue)
+    if (discover) void discoverNeighbors(user.login)
+  } catch {
+    position = fallbackPosition(user.login)
+  }
+  const value = { ...baseValue, world_position: position }
+  cache.set(normalizedUsername, { value, expiresAt: Date.now() + cacheTtlMs })
+  return value
+}
+
 app.get('/api/developers/:username', async (request, response) => {
   const username = request.params.username.replace('@', '').toLowerCase()
-  const cached = cache.get(username)
-  if (cached && cached.expiresAt > Date.now()) return response.json({ ...cached.value as object, cached: true })
+  if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(username)) return response.status(400).json({ message: 'Nome de usuário do GitHub inválido.' })
+  const session = currentSession(request.headers.cookie)
+  await recordEvent('developer_searched', { githubLogin: session?.login, path: request.path, metadata: { username } })
   try {
-    const [userResponse, reposResponse] = await Promise.all([github(`/users/${encodeURIComponent(username)}`), github(`/users/${encodeURIComponent(username)}/repos?per_page=100&sort=updated`)])
-    const user = await userResponse.json()
-    const repositories = await reposResponse.json() as GitHubRepository[]
-    const relevantRepositories = [...repositories].sort((a, b) => b.stargazers_count - a.stargazers_count || Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 8)
-    const commitCounts = await Promise.all(relevantRepositories.map(async (repository) => [repository.html_url, await getCommitCount(repository)] as const))
-    const commitsByUrl = new Map(commitCounts)
-    const baseValue = { user, repositories: repositories.map((repository) => ({ ...repository, commit_count: commitsByUrl.get(repository.html_url) ?? 0 })), cached: false }
-    let position: WorldPosition
-    try { position = await saveDeveloper(baseValue); void discoverNeighbors(user.login) }
-    catch { position = fallbackPosition(user.login) }
-    const value = { ...baseValue, world_position: position }
-    cache.set(username, { value, expiresAt: Date.now() + cacheTtlMs })
+    const value = await syncDeveloper(username)
+    await recordEvent('developer_loaded', { githubLogin: session?.login, path: request.path, metadata: { username } })
     response.json(value)
   } catch (error) { response.status(502).json({ message: error instanceof Error ? error.message : 'Falha ao consultar o GitHub.' }) }
 })
 
-app.listen(Number(process.env.PORT ?? 3001), () => console.log('GitHub Ocean API listening on http://localhost:3001'))
+app.get('/api/cron/index-world', async (request, response) => {
+  const secret = process.env.CRON_SECRET
+  if (!secret) return response.status(503).json({ message: 'CRON_SECRET não configurado.' })
+  const authorization = request.headers.authorization
+  if (!authorization?.startsWith('Bearer ') || !sameValue(authorization.slice(7), secret)) return response.status(401).json({ message: 'Não autorizado.' })
+  try {
+    const indexerState = await prisma.indexerState.upsert({ where: { key: 'github-public-users' }, create: { key: 'github-public-users' }, update: {} })
+    const usersResponse = await github(`/users?since=${indexerState.cursor}&per_page=8`)
+    const users = await usersResponse.json() as { id: number; login: string }[]
+    const indexed: string[] = []
+    let cursor = indexerState.cursor
+    for (const user of users) {
+      try {
+        await syncDeveloper(user.login, false)
+        indexed.push(user.login)
+        cursor = user.id
+        await prisma.indexerState.update({ where: { key: 'github-public-users' }, data: { cursor } })
+      } catch (error) {
+        console.warn(`Falha ao indexar ${user.login}.`, error)
+        break
+      }
+    }
+    response.json({ indexed, cursor })
+  } catch (error) {
+    response.status(502).json({ message: error instanceof Error ? error.message : 'Falha no indexador.' })
+  }
+})
+
+if (!process.env.VERCEL) {
+  const port = Number(process.env.PORT ?? 3001)
+  app.listen(port, () => console.log(`GitHub Ocean API listening on http://localhost:${port}`))
+}
+
+export default app

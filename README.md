@@ -9,6 +9,7 @@ Um mundo 3D navegável em que perfis públicos do GitHub viram barcos e suas tec
 - Cálculo determinístico do barco: classe, cor da vela e posição são derivados dos dados do perfil.
 - Cena Three.js navegável com câmera orbit, zoom e ilhas iniciais das regiões técnicas.
 - Card do explorador com stack, repositórios, stars e followers.
+- Analytics de abertura, buscas, logins e interesse em repositórios, sem guardar tokens do GitHub.
 
 ## Rodar localmente
 
@@ -47,6 +48,30 @@ Copie `.env.example` para `.env` e preencha `GITHUB_TOKEN` com um fine-grained t
 
 Ao clicar em **Entrar com GitHub**, o backend realiza o OAuth e o navegador volta diretamente para o porto do usuário. O secret fica só no backend e o token não é exposto ao frontend.
 
+As sessões são assinadas com `SESSION_SECRET`, portanto continuam válidas mesmo quando uma função de produção reinicia. Para desenvolvimento, existe uma chave local automática; em produção a variável é obrigatória.
+
+### Analytics do MVP
+
+O frontend usa o Web Analytics da Vercel para pageviews e registra no PostgreSQL os eventos importantes do produto: abertura da aplicação, busca, perfil carregado, login concluído e abertura de repositório. O identificador anônimo é aleatório e fica no navegador; nenhum access token do GitHub é salvo.
+
+Após aplicar a migration, um resumo dos últimos 30 dias fica disponível em:
+
+```bash
+curl -H "Authorization: Bearer SEU_ANALYTICS_SECRET" http://localhost:3001/api/analytics/summary
+```
+
+### Preparação para produção
+
+O projeto inclui uma função serverless para a API e um Cron diário que indexa até oito perfis por execução. Antes de publicar:
+
+1. Use um PostgreSQL gerenciado e configure `DATABASE_URL`.
+2. Rode `npm run db:deploy` contra esse banco.
+3. Configure `WEB_ORIGIN` e `API_ORIGIN` com a URL pública HTTPS.
+4. Configure `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `CRON_SECRET` e `ANALYTICS_SECRET`.
+5. Na OAuth App do GitHub, cadastre `https://SEU-DOMINIO/api/auth/callback` como callback.
+
+`VITE_API_ORIGIN` deve ficar vazio quando site e API usam o mesmo domínio. O arquivo `vercel.json` já contém o build, o encaminhamento `/api` e o agendamento diário.
+
 As oito ilhas mais relevantes recebem uma contagem de commits via API. Ela é cacheada por 15 minutos no servidor para reduzir chamadas. O tamanho visual da ilha combina commits, stars e forks, sempre com limite máximo para preservar o mapa.
 
 ### Mundo persistente e posições fixas
@@ -74,6 +99,6 @@ O nível e o tamanho usam uma pontuação limitada de commits, stars e quantidad
 
 ## Próxima evolução planejada
 
-1. Executar o coletor em lotes para indexar progressivamente os perfis públicos do GitHub.
-2. Carregar por chunks conforme o barco navega, em vez de renderizar o mundo inteiro no navegador.
+1. Painel visual privado para consultar as métricas sem usar a rota manual.
+2. Rate limiting distribuído antes de uma divulgação maior.
 3. Rotas de pull requests, organizações e contribuições para enriquecer a evolução.

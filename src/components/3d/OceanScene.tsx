@@ -13,6 +13,7 @@ import { SkyStars, CameraTravel } from './SkyStars'
 export function OceanScene({
   profile,
   worldProfiles,
+  focusProfile,
   canSail,
   returnHome,
   onDeveloperClick,
@@ -22,6 +23,7 @@ export function OceanScene({
 }: {
   profile: ShipProfile | null
   worldProfiles: ShipProfile[]
+  focusProfile: ShipProfile | null
   canSail: boolean
   returnHome: number
   onDeveloperClick: (developer: ShipProfile) => void
@@ -68,13 +70,13 @@ export function OceanScene({
           )}
         </>
       )}
-      {!canSail && <CameraTravel destination={profile?.position ?? null} controls={controls} />}
+      {!canSail && <CameraTravel destination={focusProfile?.homePosition ?? profile?.homePosition ?? null} controls={controls} />}
       <SkyStars />
       {!canSail && (
         <OrbitControls
           ref={controls}
           makeDefault
-          target={profile?.position ?? [0, 1.5, 0]}
+          target={focusProfile?.homePosition ?? profile?.homePosition ?? [0, 1.5, 0]}
           minDistance={5}
           maxDistance={120}
           minPolarAngle={Math.PI / 8}

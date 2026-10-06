@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import type { GitHubRepository, GitHubUser, Locale, RepositoryIsland, ShipProfile, WorldChunk } from './types/ocean'
 import { apiUrl, copy, initialGithubLogin } from './utils/constants'
 import { createProfile, worldChunkFor } from './utils/oceanMath'
+import { trackEvent } from './utils/analytics'
 import { useOceanAmbience } from './audio/useOceanAmbience'
 import { OceanScene } from './components/3d/OceanScene'
 import { Topbar } from './components/ui/Topbar'
@@ -20,6 +21,7 @@ export function App() {
   const [profile, setProfile] = useState<ShipProfile | null>(null)
   const [worldProfiles, setWorldProfiles] = useState<ShipProfile[]>([])
   const [selectedDeveloper, setSelectedDeveloper] = useState<ShipProfile | null>(null)
+  const [focusedDeveloper, setFocusedDeveloper] = useState<ShipProfile | null>(null)
   const [githubLogin, setGithubLogin] = useState<string | null>(initialGithubLogin)
   const [selectedRepository, setSelectedRepository] = useState<RepositoryIsland | null>(null)
   const [locale, setLocale] = useState<Locale>(
@@ -33,6 +35,12 @@ export function App() {
   const [soundEnabled, setSoundEnabled] = useState(false)
 
   useOceanAmbience(soundEnabled)
+
+  useEffect(() => {
+    if (sessionStorage.getItem('github-ocean-open-tracked')) return
+    sessionStorage.setItem('github-ocean-open-tracked', 'true')
+    trackEvent('app_opened')
+  }, [])
 
   const t = copy[locale]
 
@@ -63,8 +71,10 @@ export function App() {
           setProfile(nextProfile)
           setPlayerPosition(nextProfile.position)
           setSelectedDeveloper(null)
+          setFocusedDeveloper(null)
         } else {
           setSelectedDeveloper(nextProfile)
+          setFocusedDeveloper(nextProfile)
         }
         setSelectedRepository(null)
         setStatus(
@@ -141,6 +151,7 @@ export function App() {
 
   useEffect(() => {
     if (initialGithubLogin) {
+      // oxlint-disable-next-line react/set-state-in-effect
       void loadDeveloper(initialGithubLogin, true)
       window.history.replaceState({}, '', window.location.pathname)
     }
@@ -160,19 +171,36 @@ export function App() {
     setSelectedDeveloper(developer)
   }, [])
 
+  const visitRepository = useCallback((repository: RepositoryIsland) => {
+    trackEvent('repository_opened', { repository: repository.name })
+    setSelectedRepository(repository)
+  }, [])
+
   const displayedProfile = selectedDeveloper ?? profile
-  const canSail = Boolean(githubLogin && profile && githubLogin.toLowerCase() === profile.user.login.toLowerCase())
+  const canSail = Boolean(githubLogin && profile && !focusedDeveloper && githubLogin.toLowerCase() === profile.user.login.toLowerCase())
+  const visibleWorldProfiles = focusedDeveloper && !worldProfiles.some((developer) => developer.user.login.toLowerCase() === focusedDeveloper.user.login.toLowerCase())
+    ? [...worldProfiles, focusedDeveloper]
+    : worldProfiles
+
+  const returnToHome = useCallback(() => {
+    setSelectedDeveloper(null)
+    setFocusedDeveloper(null)
+    setSelectedRepository(null)
+    if (profile) setWorldChunk(worldChunkFor(profile.homePosition))
+    setReturnHome((value) => value + 1)
+  }, [profile])
 
   return (
     <main className="app-shell">
       <div className="ocean">
         <OceanScene
           profile={profile}
-          worldProfiles={worldProfiles}
+          worldProfiles={visibleWorldProfiles}
+          focusProfile={focusedDeveloper}
           canSail={canSail}
           returnHome={returnHome}
           onDeveloperClick={visitDeveloper}
-          onRepositoryClick={setSelectedRepository}
+          onRepositoryClick={visitRepository}
           onChunkChange={updateWorldChunk}
           onPositionChange={updatePlayerPosition}
         />
@@ -184,7 +212,7 @@ export function App() {
         locale={locale}
         onChangeLocale={changeLocale}
         githubLogin={githubLogin}
-        onReturnHome={() => setReturnHome((value) => value + 1)}
+        onReturnHome={returnToHome}
       />
 
       <SearchCard
@@ -204,8 +232,8 @@ export function App() {
       {profile && (
         <MiniMap
           profile={profile}
-          developers={worldProfiles}
-          playerPosition={canSail ? playerPosition : profile.position}
+          developers={visibleWorldProfiles}
+          playerPosition={focusedDeveloper?.homePosition ?? (canSail ? playerPosition : profile.position)}
         />
       )}
 

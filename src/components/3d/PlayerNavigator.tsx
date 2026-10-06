@@ -53,6 +53,7 @@ export function PlayerNavigator({
       rotation: -0.35,
     }
     current.current = next
+    recenterCamera.current = true
     physics.current = { speed: 0, angularVelocity: 0, heeling: 0, pitch: 0, roll: 0 }
     playerSailingMetrics.speed = 0
     ship.current?.position.set(...next.position)
@@ -68,7 +69,6 @@ export function PlayerNavigator({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return
       if (['w', 'a', 's', 'd'].includes(event.key.toLowerCase())) {
         keys.current.add(event.key.toLowerCase())
-        recenterCamera.current = true
         event.preventDefault()
       }
     }

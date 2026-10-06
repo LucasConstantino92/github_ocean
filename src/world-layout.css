@@ -1,9 +1,15 @@
-.search-card.docked { background: rgba(4, 24, 41, .76); border: 1px solid rgba(173, 224, 239, .23); border-radius: 15px; box-shadow: 0 16px 50px rgba(0, 0, 0, .25); margin: 0; padding: 14px; position: fixed; left: 50%; text-align: left; top: 16px; transform: translateX(-50%); width: min(480px, calc(100% - 68px)); }
+.search-card.docked { background: rgba(4, 24, 41, .76); border: 1px solid rgba(173, 224, 239, .23); border-radius: 15px; box-shadow: 0 16px 50px rgba(0, 0, 0, .25); margin: 0; padding: 14px 52px 14px 14px; position: fixed; left: 50%; text-align: left; top: 16px; transform: translateX(-50%); transition: width .28s ease, height .28s ease, padding .28s ease, border-radius .28s ease, background .28s ease; width: min(480px, calc(100% - 68px)); }
 .search-card.docked h1 { display: none; }
 .search-card.docked .eyebrow { font-size: 8px; margin-bottom: 7px; }
 .search-card.docked .status { font-size: 11px; margin: 8px 2px 0; }
+.search-card-content { opacity: 1; transition: opacity .16s ease; }
+.search-toggle { align-items: center; background: rgba(12, 49, 72, .92) !important; border: 1px solid rgba(173, 224, 239, .25) !important; border-radius: 9px !important; color: #bfe6f2 !important; display: flex; font-size: 22px; height: 36px; justify-content: center; padding: 0 !important; position: absolute; right: 10px; top: 10px; width: 36px; z-index: 2; }
+.search-toggle:hover { background: rgba(25, 73, 99, .98) !important; color: #fff !important; }
+.search-card.docked.collapsed { border-radius: 50%; height: 46px; padding: 0; width: 46px; }
+.search-card.collapsed .search-card-content { opacity: 0; pointer-events: none; visibility: hidden; }
+.search-card.collapsed .search-toggle { border-radius: 50% !important; height: 46px; inset: -1px; width: 46px; }
 .profile-card { bottom: auto; position: fixed; top: 96px; }
-@media (max-width: 640px) { .search-card.docked { left: 50%; top: 62px; width: calc(100% - 32px); } }
+@media (max-width: 640px) { .search-card.docked { left: 50%; top: 62px; width: calc(100% - 32px); } .search-card.docked.collapsed { width: 46px; } }
 .login { background: rgba(224, 169, 91, .95); border-radius: 8px; color: #17212e; font-size: 12px; font-weight: 700; padding: 9px 12px; pointer-events: auto; text-decoration: none; }
 .sound { background: rgba(4, 24, 41, .82); border: 1px solid rgba(173, 224, 239, .27); border-radius: 8px; color: #91b8c7; cursor: pointer; font-family: 'DM Mono', monospace; font-size: 10px; padding: 9px 10px; }
 .sound.active { border-color: rgba(107, 199, 230, .72); color: #b9efff; box-shadow: 0 0 18px rgba(65, 184, 220, .18); }

@@ -25,12 +25,39 @@ export function CameraTravel({
   controls: React.RefObject<OrbitControlsImpl | null>
 }) {
   const { camera } = useThree()
+  const travel = useRef<{
+    elapsed: number
+    fromPosition: THREE.Vector3
+    fromTarget: THREE.Vector3
+    toPosition: THREE.Vector3
+    toTarget: THREE.Vector3
+  } | null>(null)
+
   useEffect(() => {
     if (!destination) return
     const [x, y, z] = destination
-    camera.position.set(x + 7, y + 7, z + 10)
-    controls.current?.target.set(x, y + 0.75, z)
-    controls.current?.update()
+    const control = controls.current
+    travel.current = {
+      elapsed: 0,
+      fromPosition: camera.position.clone(),
+      fromTarget: control?.target.clone() ?? new THREE.Vector3(x, y, z),
+      toPosition: new THREE.Vector3(x + 8.5, y + 8, z + 11.5),
+      toTarget: new THREE.Vector3(x, y + 0.75, z),
+    }
   }, [camera, controls, destination])
+
+  useFrame((_, delta) => {
+    const current = travel.current
+    if (!current) return
+    current.elapsed = Math.min(current.elapsed + delta, 1.25)
+    const progress = current.elapsed / 1.25
+    const eased = 1 - Math.pow(1 - progress, 3)
+    camera.position.lerpVectors(current.fromPosition, current.toPosition, eased)
+    controls.current?.target.lerpVectors(current.fromTarget, current.toTarget, eased)
+    controls.current?.update()
+    if (progress >= 1) {
+      travel.current = null
+    }
+  })
   return null
 }
