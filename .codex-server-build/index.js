@@ -6,7 +6,7 @@ import { PrismaClient } from '@prisma/client';
 const app = express();
 const cache = new Map();
 const cacheTtlMs = 15 * 60 * 1000;
-const githubHeaders = { Accept: 'application/vnd.github+json', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) };
+const githubHeaders = { Accept: 'application/vnd.github+json', 'User-Agent': 'github-ocean', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) };
 const oauthStates = new Map();
 const sessions = new Map();
 const prisma = new PrismaClient();
@@ -97,13 +97,24 @@ app.get('/api/auth/callback', async (request, response) => {
         return response.status(400).send('Login GitHub inválido ou expirado.');
     oauthStates.delete(state);
     try {
-        const tokenResponse = await fetch('https://github.com/login/oauth/access_token', { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code }) });
+        const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'github-ocean' },
+            body: JSON.stringify({ client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code }),
+        });
         const tokenData = await tokenResponse.json();
-        if (!tokenData.access_token)
-            throw new Error('GitHub não retornou o token.');
-        const userResponse = await fetch('https://api.github.com/user', { headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${tokenData.access_token}` } });
-        if (!userResponse.ok)
-            throw new Error('Não foi possível ler o perfil GitHub.');
+        if (!tokenData.access_token) {
+            console.error('Erro OAuth access_token:', tokenData);
+            throw new Error(tokenData.error_description ?? tokenData.error ?? 'GitHub não retornou o token.');
+        }
+        const userResponse = await fetch('https://api.github.com/user', {
+            headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'github-ocean', Authorization: `Bearer ${tokenData.access_token}` },
+        });
+        if (!userResponse.ok) {
+            const errText = await userResponse.text();
+            console.error('Erro OAuth user fetch:', userResponse.status, errText);
+            throw new Error(`Não foi possível ler o perfil GitHub (${userResponse.status}).`);
+        }
         const user = await userResponse.json();
         const session = randomBytes(32).toString('hex');
         sessions.set(session, { login: user.login, avatarUrl: user.avatar_url });
@@ -111,6 +122,7 @@ app.get('/api/auth/callback', async (request, response) => {
         response.redirect(`${process.env.WEB_ORIGIN ?? 'http://localhost:5173'}?github=${encodeURIComponent(user.login)}`);
     }
     catch (error) {
+        console.error('Falha ao entrar com GitHub:', error);
         response.status(502).send(error instanceof Error ? error.message : 'Falha ao entrar com GitHub.');
     }
 });
@@ -145,7 +157,12 @@ app.get('/api/world/chunks/:x/:z', async (request, response) => {
     }
 });
 async function github(path) {
-    const response = await fetch(`https://api.github.com${path}`, { headers: githubHeaders });
+    let response = await fetch(`https://api.github.com${path}`, { headers: githubHeaders });
+    if (response.status === 401 && githubHeaders.Authorization) {
+        console.warn('⚠️ GITHUB_TOKEN expirado ou inválido. Alternando automaticamente para modo público sem token.');
+        delete githubHeaders.Authorization;
+        response = await fetch(`https://api.github.com${path}`, { headers: githubHeaders });
+    }
     if (!response.ok)
         throw new Error(response.status === 404 ? 'Usuário não encontrado.' : `GitHub respondeu ${response.status}. Configure GITHUB_TOKEN no .env para aumentar o limite.`);
     return response;

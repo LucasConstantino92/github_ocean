@@ -7,7 +7,7 @@ type GitHubUser = { id: number; login: string }
 
 const apiOrigin = process.env.API_ORIGIN ?? 'http://localhost:3001'
 const statePath = path.resolve('data', 'public-indexer.json')
-const headers = { Accept: 'application/vnd.github+json', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) }
+const headers: Record<string, string> = { Accept: 'application/vnd.github+json', 'User-Agent': 'github-ocean', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) }
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function state(): Promise<CursorState> {
@@ -21,7 +21,12 @@ async function run() {
   let cursor = await state()
   while (true) {
     try {
-      const usersResponse = await fetch(`https://api.github.com/users?since=${cursor.since}&per_page=100`, { headers })
+      let usersResponse = await fetch(`https://api.github.com/users?since=${cursor.since}&per_page=100`, { headers })
+      if (usersResponse.status === 401 && headers.Authorization) {
+        console.warn('⚠️ GITHUB_TOKEN expirado no indexador. Alternando para modo público.')
+        delete headers.Authorization
+        usersResponse = await fetch(`https://api.github.com/users?since=${cursor.since}&per_page=100`, { headers })
+      }
       if (!usersResponse.ok) throw new Error(`GitHub respondeu ${usersResponse.status} ao listar usuários.`)
       const users = await usersResponse.json() as GitHubUser[]
       if (!users.length) { await sleep(60_000); continue }
