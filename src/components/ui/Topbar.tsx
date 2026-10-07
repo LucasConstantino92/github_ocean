@@ -8,6 +8,8 @@ export function Topbar({
   onChangeLocale,
   githubLogin,
   onReturnHome,
+  discoveredIslands,
+  onOpenMap,
 }: {
   soundEnabled: boolean
   onToggleSound: () => void
@@ -15,6 +17,8 @@ export function Topbar({
   onChangeLocale: (locale: Locale) => void
   githubLogin: string | null
   onReturnHome: () => void
+  discoveredIslands: number
+  onOpenMap: () => void
 }) {
   const t = copy[locale]
 
@@ -40,6 +44,8 @@ export function Topbar({
           <option value="en">English</option>
           <option value="es">Español</option>
         </select>
+        <span className="discoveries" title="Ilhas descobertas">◈ {discoveredIslands}</span>
+        <button className="map-toggle" onClick={onOpenMap}>Mapa <kbd>M</kbd></button>
         {githubLogin ? (
           <>
             <button className="home" onClick={onReturnHome}>

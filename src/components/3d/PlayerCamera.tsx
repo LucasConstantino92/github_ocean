@@ -12,9 +12,8 @@ export function PlayerCamera({
 }) {
   const { camera, gl } = useThree()
   const initialized = useRef(false)
-  const freeCamera = useRef(false)
   const dragging = useRef(false)
-  const yaw = useRef(0)
+  const yawOffset = useRef(0)
   const pitch = useRef(0.42)
   const cameraDistance = useRef(13)
   const desiredPosition = useRef(new THREE.Vector3())
@@ -26,18 +25,22 @@ export function PlayerCamera({
       if (event.button !== 2) return
       event.preventDefault()
       dragging.current = true
-      freeCamera.current = true
       const [x, y, z] = transformRef.current.position
       target.current.set(x, y + 1.15, z)
       const offset = camera.position.clone().sub(target.current)
       const distance = Math.max(offset.length(), 0.01)
       cameraDistance.current = THREE.MathUtils.clamp(distance, 7, 34)
-      yaw.current = Math.atan2(offset.x, offset.z)
+      // Preserve the player's manual orbit as an offset from the ship's bow.
+      // The camera can therefore keep following a turn instead of becoming detached.
+      yawOffset.current = THREE.MathUtils.euclideanModulo(
+        Math.atan2(offset.x, offset.z) - (transformRef.current.rotation - Math.PI / 2) + Math.PI,
+        Math.PI * 2
+      ) - Math.PI
       pitch.current = Math.asin(THREE.MathUtils.clamp(offset.y / distance, -1, 1))
     }
     const onPointerMove = (event: MouseEvent) => {
       if (!dragging.current) return
-      yaw.current -= event.movementX * 0.006
+      yawOffset.current -= event.movementX * 0.006
       pitch.current = THREE.MathUtils.clamp(pitch.current - event.movementY * 0.005, 0.08, 1.08)
     }
     const onPointerUp = () => {
@@ -72,11 +75,17 @@ export function PlayerCamera({
     target.current.set(x, y + 1.15, z)
 
     if (recenterRef.current) {
-      freeCamera.current = false
+      yawOffset.current = 0
       recenterRef.current = false
     }
-    const orbitYaw = freeCamera.current ? yaw.current : transform.rotation - Math.PI / 2
-    const orbitPitch = freeCamera.current ? pitch.current : 0.42
+    // When the right mouse button is released, the orbit gently returns behind
+    // the vessel. While held, the manual angle is retained without fighting it.
+    if (!dragging.current) {
+      yawOffset.current = THREE.MathUtils.damp(yawOffset.current, 0, 2.4, dt)
+      pitch.current = THREE.MathUtils.damp(pitch.current, 0.42, 2.4, dt)
+    }
+    const orbitYaw = transform.rotation - Math.PI / 2 + yawOffset.current
+    const orbitPitch = pitch.current
     const horizontalDistance = Math.cos(orbitPitch) * distance
     desiredPosition.current.set(
       x + Math.sin(orbitYaw) * horizontalDistance,
@@ -88,7 +97,7 @@ export function PlayerCamera({
       camera.position.copy(desiredPosition.current)
       initialized.current = true
     } else {
-      const smooth = 1 - Math.exp(-(freeCamera.current ? 8.5 : 5.5) * dt)
+      const smooth = 1 - Math.exp(-(dragging.current ? 8.5 : 5.5) * dt)
       camera.position.lerp(desiredPosition.current, smooth)
     }
     camera.up.set(0, 1, 0)

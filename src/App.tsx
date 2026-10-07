@@ -1,22 +1,27 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Building, GitHubRepository, GitHubUser, Locale, RepositoryIsland, ShipProfile, WorldChunk } from './types/ocean'
 import { apiUrl, copy, initialGithubLogin } from './utils/constants'
 import { createProfile, worldChunkFor } from './utils/oceanMath'
 import { trackEvent } from './utils/analytics'
+import { loadPreferences, saveDiscoveredPorts } from './utils/preferences'
 import { useOceanAmbience } from './audio/useOceanAmbience'
 import { OceanScene } from './components/3d/OceanScene'
+import type { CameraView } from './components/3d/OceanScene'
 import { Topbar } from './components/ui/Topbar'
 import { SearchCard } from './components/ui/SearchCard'
 import { ProfileCard } from './components/ui/ProfileCard'
 import { RepositoryCard } from './components/ui/RepositoryCard'
 import { MiniMap } from './components/ui/MiniMap'
 import { BuildingCard } from './components/ui/BuildingCard'
+import { WaypointCompass, WorldMap } from './components/ui/WorldMap'
 
 import './App.css'
 import './repository.css'
 import './world-layout.css'
 import './progression.css'
+
+const defaultViewDirection: [number, number, number] = [1, 0, 0]
 
 export function App() {
   const [username, setUsername] = useState(initialGithubLogin ?? '')
@@ -33,9 +38,15 @@ export function App() {
   const [status, setStatus] = useState(copy['pt-BR'].initial)
   const [loading, setLoading] = useState(false)
   const [returnHome, setReturnHome] = useState(0)
-  const [worldChunk, setWorldChunk] = useState<WorldChunk | null>(null)
+  const [, setWorldChunk] = useState<WorldChunk | null>(null)
   const [playerPosition, setPlayerPosition] = useState<[number, number, number]>([0, 0, 0])
+  const [cameraView, setCameraView] = useState<CameraView | null>(null)
+  const worldChunkCache = useRef(new Map<string, { user: GitHubUser; repositories: GitHubRepository[]; world_position?: [number, number] }[]>())
   const [soundEnabled, setSoundEnabled] = useState(false)
+  const [discoveredPorts, setDiscoveredPorts] = useState<Set<string>>(() => new Set(loadPreferences().discoveredPorts))
+  const [mapOpen, setMapOpen] = useState(false)
+  const [waypoint, setWaypoint] = useState<[number, number, number] | null>(null)
+  const [playerHeading, setPlayerHeading] = useState(-.35)
 
   useOceanAmbience(soundEnabled)
 
@@ -46,6 +57,17 @@ export function App() {
   }, [])
 
   const t = copy[locale]
+
+  const discoverPort = useCallback((login: string) => {
+    const normalized = login.toLowerCase()
+    setDiscoveredPorts((current) => {
+      if (current.has(normalized)) return current
+      const next = new Set(current)
+      next.add(normalized)
+      saveDiscoveredPorts(next)
+      return next
+    })
+  }, [])
 
   const changeLocale = (next: Locale) => {
     localStorage.setItem('github-ocean-locale', next)
@@ -70,6 +92,7 @@ export function App() {
         if (!developerResponse.ok) throw new Error(developer.message ?? 'Não foi possível consultar o GitHub.')
         const { user, repositories } = developer
         const nextProfile = createProfile(user, repositories, developer.world_position)
+        discoverPort(nextProfile.user.login)
         if (asCaptain || !githubLogin) {
           setProfile(nextProfile)
           setPlayerPosition(nextProfile.position)
@@ -94,7 +117,7 @@ export function App() {
         setLoading(false)
       }
     },
-    [githubLogin]
+    [discoverPort, githubLogin]
   )
 
   const updateWorldChunk = useCallback((nextChunk: WorldChunk) => {
@@ -105,32 +128,80 @@ export function App() {
     setPlayerPosition(position)
   }, [])
 
-  const chunkX = worldChunk?.[0]
-  const chunkZ = worldChunk?.[1]
+  const updateCameraView = useCallback((next: CameraView) => {
+    setCameraView((current) => {
+      if (!current) return next
+      const dx = next.position[0] - current.position[0]
+      const dz = next.position[2] - current.position[2]
+      const directionDot = next.direction[0] * current.direction[0] + next.direction[2] * current.direction[2]
+      // The loading cone only needs an update after meaningful travel or rotation.
+      return dx * dx + dz * dz < 14 * 14 && directionDot > .965 ? current : next
+    })
+  }, [])
+
+  const updatePlayerHeading = useCallback((heading: number) => {
+    setPlayerHeading(heading)
+  }, [])
 
   useEffect(() => {
-    if (chunkX === undefined || chunkZ === undefined) return
-    const abort = new AbortController()
-    const regions: WorldChunk[] = []
-    for (let x = chunkX - 1; x <= chunkX + 1; x++) {
-      for (let z = chunkZ - 1; z <= chunkZ + 1; z++) {
-        regions.push([x, z])
+    const toggleMap = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return
+      if (event.key.toLowerCase() !== 'm') return
+      event.preventDefault()
+      setMapOpen((open) => !open)
+    }
+    window.addEventListener('keydown', toggleMap)
+    return () => window.removeEventListener('keydown', toggleMap)
+  }, [])
+
+  const chunkSource = cameraView?.position ?? playerPosition
+  const sourceChunk = worldChunkFor(chunkSource)
+  const loadingDirection = cameraView?.direction ?? defaultViewDirection
+  const directionSector = Math.round(Math.atan2(loadingDirection[2], loadingDirection[0]) / (Math.PI / 4))
+  const sourceChunkX = sourceChunk[0]
+  const sourceChunkZ = sourceChunk[1]
+  const regions = useMemo(() => {
+    const result: WorldChunk[] = []
+    const directionAngle = directionSector * Math.PI / 4
+    const forwardX = Math.cos(directionAngle)
+    const forwardZ = Math.sin(directionAngle)
+    for (let x = -2; x <= 2; x++) {
+      for (let z = -2; z <= 2; z++) {
+        const forward = x * forwardX + z * forwardZ
+        const side = Math.abs(x * -forwardZ + z * forwardX)
+        // A forward V: reach two chunks ahead, keep a narrow buffer to avoid
+        // pop-in during a turn, and avoid requesting the unseen rear ocean.
+        if (forward < -.45 || forward > 2.2 || side > forward * .9 + .9) continue
+        result.push([sourceChunkX + x, sourceChunkZ + z])
       }
     }
+    return result
+  }, [directionSector, sourceChunkX, sourceChunkZ])
+
+  useEffect(() => {
+    const abort = new AbortController()
+    const missing = regions.filter(([x, z]) => !worldChunkCache.current.has(`${x}:${z}`))
     void Promise.all(
-      regions.map(async ([x, z]) => {
+      missing.map(async ([x, z]) => {
         const response = await fetch(apiUrl(`/api/world/chunks/${x}/${z}`), { signal: abort.signal })
         if (!response.ok) throw new Error(`Região ${x}:${z} indisponível`)
-        return response.json() as Promise<{
-          developers: { user: GitHubUser; repositories: GitHubRepository[]; world_position?: [number, number] }[]
-        }>
+        const chunk = await response.json() as { developers: { user: GitHubUser; repositories: GitHubRepository[]; world_position?: [number, number] }[] }
+        return { key: `${x}:${z}`, developers: chunk.developers }
       })
     )
       .then((chunks) => {
         if (abort.signal.aborted) return
+        for (const chunk of chunks) worldChunkCache.current.set(chunk.key, chunk.developers)
+        // Keep the cache bounded while retaining the current field of view.
+        while (worldChunkCache.current.size > 48) {
+          const oldest = worldChunkCache.current.keys().next().value
+          if (oldest === undefined) break
+          worldChunkCache.current.delete(oldest)
+        }
         const developers = new Map<string, ShipProfile>()
-        for (const chunk of chunks) {
-          for (const developer of chunk.developers) {
+        for (const [x, z] of regions) {
+          for (const developer of worldChunkCache.current.get(`${x}:${z}`) ?? []) {
             developers.set(
               developer.user.login,
               createProfile(developer.user, developer.repositories, developer.world_position)
@@ -143,7 +214,7 @@ export function App() {
         if (!abort.signal.aborted) console.warn('Não foi possível carregar esta região do oceano.', error)
       })
     return () => abort.abort()
-  }, [chunkX, chunkZ])
+  }, [regions])
 
   const findDeveloper = useCallback(
     (event: FormEvent) => {
@@ -231,6 +302,10 @@ export function App() {
           onBuildingClick={visitBuilding}
           onChunkChange={updateWorldChunk}
           onPositionChange={updatePlayerPosition}
+          onViewChange={updateCameraView}
+          onDiscoverPort={discoverPort}
+          discoveredPorts={discoveredPorts}
+          onHeadingChange={updatePlayerHeading}
         />
       </div>
 
@@ -241,6 +316,8 @@ export function App() {
         onChangeLocale={changeLocale}
         githubLogin={githubLogin}
         onReturnHome={returnToHome}
+        discoveredIslands={discoveredPorts.size}
+        onOpenMap={() => setMapOpen(true)}
       />
 
       <SearchCard
@@ -263,8 +340,21 @@ export function App() {
           profile={profile}
           developers={visibleWorldProfiles}
           playerPosition={focusedDeveloper?.homePosition ?? (canSail ? playerPosition : profile.position)}
+          discoveredPorts={discoveredPorts}
         />
       )}
+
+      <WaypointCompass waypoint={waypoint} playerPosition={playerPosition} heading={playerHeading} onClear={() => setWaypoint(null)} />
+      <WorldMap
+        open={mapOpen}
+        profile={profile}
+        developers={visibleWorldProfiles}
+        playerPosition={playerPosition}
+        discoveredPorts={discoveredPorts}
+        waypoint={waypoint}
+        onWaypointChange={(point) => { setWaypoint(point); setMapOpen(false) }}
+        onClose={() => setMapOpen(false)}
+      />
 
       <footer>
         <span>{canSail ? t.controls : 'Arraste para olhar · Scroll para zoom'}</span>

@@ -50,7 +50,10 @@ export function createProfile(
     ? [worldPosition[0], 0, worldPosition[1]]
     : [((seed % 360) - 180) / 9, 0, (((seed >>> 9) % 360) - 180) / 9]
 
-  const position: [number, number, number] = [homePosition[0] + island.columns * island.spacing / 2 + 1.2, 0, homePosition[2] + island.rows * island.spacing / 2 + .3]
+  // Dock the ship just beyond the furthest eastern shore. This keeps every
+  // archetype (including wide chains and lagoons) clear of its own collision coast.
+  const easternShore = Math.max(...island.landmasses.map((land) => land.x + land.radius * land.stretch))
+  const position: [number, number, number] = [homePosition[0] + easternShore + 1.25, 0, homePosition[2]]
 
   const repositoryIslands: RepositoryIsland[] = rankedRepositories(repositories)
     .slice(0, 8)

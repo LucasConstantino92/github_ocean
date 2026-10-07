@@ -34,15 +34,35 @@ test('reordering stored repositories does not change any visual identity', () =>
   assert.deepEqual(calculateProgression(user, repos), calculateProgression({ ...user, login: 'CAPTAIN' }, [...repos].reverse()))
 })
 
-test('all highlighted projects have distinct clickable plots even at low scores', () => {
+test('all highlighted projects have distinct clickable places on solid land', () => {
   const progress = calculateProgression({ ...user, public_repos: 100 }, repositories(100))
   const projects = progress.buildings.filter((b) => b.repositoryUrl)
   assert.equal(projects.length, 8)
   assert.equal(new Set(progress.buildings.map((b) => b.position.join(':'))).size, progress.buildings.length)
   for (const building of progress.buildings) {
-    assert.ok(Math.abs(building.position[0]) + .55 < progress.island.columns * progress.island.spacing / 2)
-    assert.ok(Math.abs(building.position[2]) + .55 < progress.island.rows * progress.island.spacing / 2)
+    const isOnLand = progress.island.landmasses.some((land) => {
+      const x = building.position[0] - land.x
+      const z = building.position[2] - land.z
+      const localX = Math.cos(land.rotation) * x + Math.sin(land.rotation) * z
+      const localZ = -Math.sin(land.rotation) * x + Math.cos(land.rotation) * z
+      return (localX / (land.radius * land.stretch * .72)) ** 2 + (localZ / (land.radius * .72)) ** 2 < 1
+    })
+    assert.ok(isOnLand)
   }
+})
+
+test('coastlines evolve from a cay to a lagoon and remain deterministic', () => {
+  const scenarios = [[0, 0, 0, 0, 0], [20, 0, 0, 0, 0], [35, 10, 1, 0, 20], [60, 20, 2, 1, 80], [100, 100, 10, 5, 300]]
+  const examples = scenarios.map(([publicRepos, commits, stars, forks, followers]) => calculateProgression(
+    { ...user, public_repos: publicRepos, followers },
+    repositories(Math.max(publicRepos, 1), { commit_count: commits, stargazers_count: stars, forks_count: forks })
+  ))
+  assert.deepEqual(examples.map((progress) => progress.island.style), ['cay', 'island', 'chain', 'archipelago', 'lagoon'])
+  assert.ok(examples[0].island.landmasses.length < examples[4].island.landmasses.length)
+  assert.deepEqual(examples[4].island, calculateProgression(
+    { ...user, public_repos: 100, followers: 300 },
+    repositories(100, { commit_count: 100, stargazers_count: 10, forks_count: 5 })
+  ).island)
 })
 
 test('small, medium and large profiles grow without overflowing port spacing', () => {

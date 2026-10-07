@@ -9,14 +9,20 @@ import { PlayerCamera } from './PlayerCamera'
 
 export function PlayerNavigator({
   profile,
+  collisionProfiles,
   returnHome,
   onChunkChange,
   onPositionChange,
+  onDiscoverPort,
+  onHeadingChange,
 }: {
   profile: ShipProfile | null
+  collisionProfiles: ShipProfile[]
   returnHome: number
   onChunkChange: (chunk: WorldChunk) => void
   onPositionChange: (position: [number, number, number]) => void
+  onDiscoverPort: (login: string) => void
+  onHeadingChange: (heading: number) => void
 }) {
   const keys = useRef(new Set<string>())
   const recenterCamera = useRef(false)
@@ -24,6 +30,8 @@ export function PlayerNavigator({
   const ship = useRef<THREE.Group>(null)
   const current = useRef<PlayerTransform>({ position: profile?.position ?? [0, 0, 0], rotation: -0.35 })
   const lastPositionReport = useRef(0)
+  const lastHeadingReport = useRef(0)
+  const discoveredThisSail = useRef(new Set<string>())
 
   // Física de navegação marítima
   const physics = useRef({
@@ -33,6 +41,31 @@ export function PlayerNavigator({
     pitch: 0,
     roll: 0,
   })
+
+  const collidesAt = useCallback((x: number, z: number) => {
+    const hullClearance = profile ? .42 + profile.progression.ship.hullWidth * profile.progression.ship.size * .42 : .7
+    const profiles = profile ? [profile, ...collisionProfiles.filter((candidate) => candidate.user.login.toLowerCase() !== profile.user.login.toLowerCase())] : collisionProfiles
+    for (const candidate of profiles) {
+      // Elliptical tests follow the actual rotated landmasses, including the
+      // open water in the middle of a lagoon.
+      for (const land of candidate.island.landmasses) {
+        const dx = x - (candidate.homePosition[0] + land.x)
+        const dz = z - (candidate.homePosition[2] + land.z)
+        const localX = Math.cos(land.rotation) * dx + Math.sin(land.rotation) * dz
+        const localZ = -Math.sin(land.rotation) * dx + Math.cos(land.rotation) * dz
+        const radiusX = land.radius * land.stretch + hullClearance
+        const radiusZ = land.radius + hullClearance
+        if ((localX / radiusX) ** 2 + (localZ / radiusZ) ** 2 < 1) return true
+      }
+      if (candidate.user.login.toLowerCase() !== profile?.user.login.toLowerCase()) {
+        const dx = x - candidate.position[0]
+        const dz = z - candidate.position[2]
+        const shipClearance = 1.05 + candidate.progression.ship.size * .48 + hullClearance
+        if (dx * dx + dz * dz < shipClearance * shipClearance) return true
+      }
+    }
+    return false
+  }, [collisionProfiles, profile])
 
   const reportChunk = useCallback(
     (position: [number, number, number]) => {
@@ -56,6 +89,7 @@ export function PlayerNavigator({
     recenterCamera.current = true
     physics.current = { speed: 0, angularVelocity: 0, heeling: 0, pitch: 0, roll: 0 }
     playerSailingMetrics.speed = 0
+    discoveredThisSail.current.clear()
     ship.current?.position.set(...next.position)
     ship.current?.rotation.set(0, next.rotation, 0)
     reportChunk(next.position)
@@ -129,8 +163,22 @@ export function PlayerNavigator({
     const forwardX = Math.cos(newRotation)
     const forwardZ = -Math.sin(newRotation)
     const [currX, , currZ] = current.current.position
-    const newX = currX + forwardX * distance
-    const newZ = currZ + forwardZ * distance
+    let newX = currX + forwardX * distance
+    let newZ = currZ + forwardZ * distance
+
+    // Coast and anchored ship collisions: try each axis independently so the
+    // player naturally glides along a beach instead of stopping on every touch.
+    if (collidesAt(newX, newZ)) {
+      const canSlideX = !collidesAt(newX, currZ)
+      const canSlideZ = !collidesAt(currX, newZ)
+      if (canSlideX) newZ = currZ
+      else if (canSlideZ) newX = currX
+      else {
+        newX = currX
+        newZ = currZ
+        physics.current.speed *= .22
+      }
+    }
 
     // 3. Altura e inclinação precisas a partir das ondas do mar
     const time = clock.elapsedTime
@@ -157,20 +205,36 @@ export function PlayerNavigator({
 
     const newPosition: [number, number, number] = [newX, centerH + shipWaterlineOffset, newZ]
     current.current = { position: newPosition, rotation: newRotation }
+    const now = performance.now()
 
     // Compartilhar métricas para áudio e efeitos
     playerSailingMetrics.speed = physics.current.speed
     playerSailingMetrics.heading = newRotation
     playerSailingMetrics.pitch = physics.current.pitch
     playerSailingMetrics.roll = physics.current.roll
+    if (now - lastHeadingReport.current > 160) {
+      lastHeadingReport.current = now
+      onHeadingChange(newRotation)
+    }
 
     if (ship.current) {
       ship.current.position.set(newPosition[0], newPosition[1], newPosition[2])
       ship.current.rotation.set(physics.current.pitch, newRotation, physics.current.roll)
     }
 
+    // A port is discovered only by arriving in its waters, not by merely loading
+    // its world chunk. The set avoids repeating state updates while nearby.
+    for (const candidate of [profile, ...collisionProfiles]) {
+      const login = candidate.user.login.toLowerCase()
+      if (discoveredThisSail.current.has(login)) continue
+      const dx = newPosition[0] - candidate.homePosition[0]
+      const dz = newPosition[2] - candidate.homePosition[2]
+      if (dx * dx + dz * dz > 17 * 17) continue
+      discoveredThisSail.current.add(login)
+      onDiscoverPort(login)
+    }
+
     reportChunk(newPosition)
-    const now = performance.now()
     if (now - lastPositionReport.current > 180) {
       lastPositionReport.current = now
       onPositionChange(newPosition)

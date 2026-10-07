@@ -4,12 +4,13 @@ import { Stars } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 
-export function SkyStars() {
+export function SkyStars({ visible = true }: { visible?: boolean }) {
   const sky = useRef<THREE.Group>(null)
   const { camera } = useThree()
   useFrame(() => {
     sky.current?.position.copy(camera.position)
   })
+  if (!visible) return null
   return (
     <group ref={sky}>
       <Stars radius={68} depth={32} count={1800} factor={3} saturation={0} fade speed={0.3} />

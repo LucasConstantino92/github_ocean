@@ -13,6 +13,8 @@ Search for a developer to visit their port, inspect their featured repositories,
 - First-person-style ship navigation with WASD, right-mouse orbital camera, and scroll zoom.
 - Search travel mode for visiting another developer's port.
 - Clickable repository buildings and progression details.
+- Local-time lighting and lightweight, changing weather.
+- Detailed ports with wandering residents, a dockside merchant, and night lanterns.
 - First-party product analytics plus optional Vercel Web Analytics.
 
 ## What public GitHub data is used
@@ -88,13 +90,25 @@ Crew is based only on confirmed authored commits in the featured-repository samp
 
 ### Island and port progression
 
-An island is made of regular land plots, rather than one uniformly scaled mesh. It begins with four plots and gains one plot for every five overall score points; it expands further whenever necessary to hold every building. The design keeps the island radius below six world units, while ports are reserved at least 12 units apart.
+Each port is a deterministic archipelago, rather than a uniformly scaled mesh or a rectangular board. Buildings are placed on solid land across its individual islands. The design keeps the island radius below six world units, while ports are reserved at least 12 units apart.
 
 The general island level is:
 
 ```text
 islandLevel = 1 + floor(overallScore / 10)
 ```
+
+The score also selects an evolving coastline:
+
+| Score | Coastline |
+| ---: | --- |
+| 0–14 | Small cay |
+| 15–34 | Main island with a satellite islet |
+| 35–57 | Long island chain |
+| 58–77 | Separated archipelago |
+| 78–100 | Lagoon surrounded by islands |
+
+The login-derived seed fixes the coastline orientation, island shapes, vegetation, and building placement. Mountains unlock as island level rises; at level 5, the main landmass receives a central manor.
 
 Port upgrades are independent, each with three levels:
 
@@ -123,8 +137,23 @@ Click a repository building to open its details and its GitHub URL. Click a shar
 | `A` / `D` | Steer |
 | Right mouse drag | Orbit camera around the player's ship |
 | Mouse wheel | Zoom |
+| `M` | Open or close the full nautical map |
 | Search | Travel to a developer's port |
 | Go to my port | Return to the signed-in captain and re-enable sailing |
+
+The full map can mark a free waypoint or a port. A compass and distance indicator guide manual sailing; it never steers the ship automatically.
+
+## Local weather and light
+
+Lighting follows the visitor's local browser clock: night, dawn, day, and dusk each change the sky, fog, and directional light. Weather is chosen from a deterministic random roll every 45 minutes using the local date, time window, and timezone. This means it feels variable without a weather API, server state, or frame-by-frame randomness.
+
+Clear skies are most common, followed by clouds and haze; rain is occasional and storms are rare. Rain uses a single camera-local particle buffer, and it is not rendered at all when the current weather is dry.
+
+## Exploration and discovery
+
+Ports that have not yet been visited appear as fog banks in the 3D world and as anonymous markers on the minimap. Entering a port's waters reveals it and increases the discovery counter in the top bar. Discovery is saved in a versioned browser preference under `github-ocean:preferences:v1`; it contains only public GitHub logins and no tokens.
+
+The local preference deliberately mirrors a future cloud shape: a `port_discoveries` table can store `user_id`, `github_login`, and `discovered_at`. This makes a later Supabase migration additive rather than a gameplay rewrite.
 
 ## Local development
 

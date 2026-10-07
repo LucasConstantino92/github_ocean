@@ -1,7 +1,8 @@
-import { useRef } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { useEffect, useRef, useState } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import * as THREE from 'three'
 import type { Building, RepositoryIsland, ShipProfile, WorldChunk } from '../../types/ocean'
 import { OceanSurface } from './OceanSurface'
 import { WorldPort } from './WorldPort'
@@ -9,6 +10,45 @@ import { HomeIsland } from './Island'
 import { Ship } from './Ship'
 import { PlayerNavigator } from './PlayerNavigator'
 import { SkyStars, CameraTravel } from './SkyStars'
+import { WeatherSystem } from './WeatherSystem'
+import { localWeather, type LocalWeather } from '../../utils/weather'
+
+export type CameraView = {
+  position: [number, number, number]
+  direction: [number, number, number]
+}
+
+function useLocalWeather() {
+  const [weather, setWeather] = useState(() => localWeather())
+  useEffect(() => {
+    const refresh = () => setWeather((current) => {
+      const next = localWeather()
+      return next.phase === current.phase && next.slot === current.slot ? current : next
+    })
+    const interval = window.setInterval(refresh, 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
+  return weather as LocalWeather
+}
+
+function CameraViewReporter({ onViewChange }: { onViewChange: (view: CameraView) => void }) {
+  const lastReport = useRef(0)
+  const direction = useRef(new THREE.Vector3())
+
+  useFrame(({ camera, clock }) => {
+    if (clock.elapsedTime - lastReport.current < .16) return
+    lastReport.current = clock.elapsedTime
+    camera.getWorldDirection(direction.current)
+    direction.current.y = 0
+    if (direction.current.lengthSq() < .001) return
+    direction.current.normalize()
+    onViewChange({
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      direction: [direction.current.x, 0, direction.current.z],
+    })
+  })
+  return null
+}
 
 export function OceanScene({
   profile,
@@ -21,6 +61,10 @@ export function OceanScene({
   onBuildingClick,
   onChunkChange,
   onPositionChange,
+  onViewChange,
+  onDiscoverPort,
+  onHeadingChange,
+  discoveredPorts,
 }: {
   profile: ShipProfile | null
   worldProfiles: ShipProfile[]
@@ -32,20 +76,22 @@ export function OceanScene({
   onBuildingClick: (building: Building) => void
   onChunkChange: (chunk: WorldChunk) => void
   onPositionChange: (position: [number, number, number]) => void
+  onViewChange: (view: CameraView) => void
+  onDiscoverPort: (login: string) => void
+  onHeadingChange: (heading: number) => void
+  discoveredPorts: ReadonlySet<string>
 }) {
   const controls = useRef<OrbitControlsImpl>(null)
+  const weather = useLocalWeather()
 
   return (
     <Canvas
       shadows
       dpr={[1, 1.5]}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
-      camera={{ position: [0, 18, 28], fov: 45 }}
+      camera={{ position: [0, 18, 28], fov: 45, near: .1, far: 210 }}
     >
-      <color attach="background" args={['#071c35']} />
-      <fog attach="fog" args={['#071c35', 30, 250]} />
-      <ambientLight intensity={1.6} />
-      <directionalLight position={[-8, 12, 4]} intensity={2.4} castShadow />
+      <WeatherSystem weather={weather} />
       <OceanSurface />
       {worldProfiles
         .filter((developer) => developer.user.login.toLowerCase() !== profile?.user.login.toLowerCase())
@@ -56,17 +102,22 @@ export function OceanScene({
             onDeveloperClick={onDeveloperClick}
             onRepositoryClick={onRepositoryClick}
             onBuildingClick={onBuildingClick}
+            isNight={weather.phase === 'night'}
+            discovered={discoveredPorts.has(developer.user.login.toLowerCase())}
           />
         ))}
       {profile && (
         <>
-          <HomeIsland profile={profile} onRepositoryClick={onRepositoryClick} onBuildingClick={onBuildingClick} />
+          <HomeIsland profile={profile} onRepositoryClick={onRepositoryClick} onBuildingClick={onBuildingClick} isNight={weather.phase === 'night'} />
           {canSail ? (
             <PlayerNavigator
               profile={profile}
+              collisionProfiles={worldProfiles}
               returnHome={returnHome}
               onChunkChange={onChunkChange}
               onPositionChange={onPositionChange}
+              onDiscoverPort={(login) => onDiscoverPort(login)}
+              onHeadingChange={onHeadingChange}
             />
           ) : (
             <Ship profile={profile} />
@@ -74,7 +125,8 @@ export function OceanScene({
         </>
       )}
       {!canSail && <CameraTravel destination={focusProfile?.homePosition ?? profile?.homePosition ?? null} controls={controls} />}
-      <SkyStars />
+      <SkyStars visible={weather.phase === 'night'} />
+      <CameraViewReporter onViewChange={onViewChange} />
       {!canSail && (
         <OrbitControls
           ref={controls}
