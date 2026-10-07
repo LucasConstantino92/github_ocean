@@ -56,7 +56,9 @@ export function WorldPort({
     frustum.current.setFromProjectionMatrix(projection.current)
     const distance = camera.position.distanceTo(world.current)
     const visible = distance < 170 && frustum.current.intersectsSphere(bounds.current)
-    const detailed = visible && distance < 72
+    // Full buildings and ambient life are kept close to the player; farther
+    // ports retain a recognizable low-detail silhouette.
+    const detailed = visible && distance < 56
     const nextMode = !visible ? 'hidden' : detailed ? 'detailed' : 'proxy'
     const currentMode = visibility.current.visible
       ? visibility.current.detailed ? 'detailed' : 'proxy'

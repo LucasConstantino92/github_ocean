@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
@@ -50,7 +50,7 @@ function CameraViewReporter({ onViewChange }: { onViewChange: (view: CameraView)
   return null
 }
 
-export function OceanScene({
+export const OceanScene = memo(function OceanScene({
   profile,
   worldProfiles,
   focusProfile,
@@ -86,8 +86,8 @@ export function OceanScene({
 
   return (
     <Canvas
-      shadows
-      dpr={[1, 1.5]}
+      shadows="basic"
+      dpr={[1, 1.25]}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
       camera={{ position: [0, 18, 28], fov: 45, near: .1, far: 210 }}
     >
@@ -140,4 +140,4 @@ export function OceanScene({
       )}
     </Canvas>
   )
-}
+})

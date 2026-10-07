@@ -46,6 +46,14 @@ export function PlayerNavigator({
     const hullClearance = profile ? .42 + profile.progression.ship.hullWidth * profile.progression.ship.size * .42 : .7
     const profiles = profile ? [profile, ...collisionProfiles.filter((candidate) => candidate.user.login.toLowerCase() !== profile.user.login.toLowerCase())] : collisionProfiles
     for (const candidate of profiles) {
+      const centerX = candidate.homePosition[0]
+      const centerZ = candidate.homePosition[2]
+      const broadRadius = candidate.island.radius + hullClearance + 1
+      const broadX = x - centerX
+      const broadZ = z - centerZ
+      // Most ports are far away. Avoid rotating/testing every landmass unless
+      // the boat first enters the port's inexpensive circular broad phase.
+      if (broadX * broadX + broadZ * broadZ > broadRadius * broadRadius) continue
       // Elliptical tests follow the actual rotated landmasses, including the
       // open water in the middle of a lagoon.
       for (const land of candidate.island.landmasses) {
@@ -212,7 +220,7 @@ export function PlayerNavigator({
     playerSailingMetrics.heading = newRotation
     playerSailingMetrics.pitch = physics.current.pitch
     playerSailingMetrics.roll = physics.current.roll
-    if (now - lastHeadingReport.current > 160) {
+    if (now - lastHeadingReport.current > 320) {
       lastHeadingReport.current = now
       onHeadingChange(newRotation)
     }
@@ -235,7 +243,7 @@ export function PlayerNavigator({
     }
 
     reportChunk(newPosition)
-    if (now - lastPositionReport.current > 180) {
+    if (now - lastPositionReport.current > 320) {
       lastPositionReport.current = now
       onPositionChange(newPosition)
     }
