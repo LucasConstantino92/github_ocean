@@ -15,15 +15,16 @@ export function RepositoryCard({
             ×
           </button>
           <p className="eyebrow" style={{ color: repository.color }}>
-            REPOSITORY ISLAND
+            {repository.building.title.toUpperCase()} · NV. {repository.building.level}
           </p>
           <h2>{repository.name}</h2>
-          <p>{repository.description ?? 'Uma ilha sem descrição, esperando por novos exploradores.'}</p>
+          <p>{repository.description ?? 'Projeto público deste explorador.'}</p>
           <div className="repo-stats">
-            <span>⌁ {repository.commit_count} commits</span>
+            <span>⌁ {repository.commit_count === null ? 'Não medidos' : repository.commit_count + ' commits do autor'}</span>
             <span>★ {repository.stargazers_count}</span>
             <span>{repository.language ?? 'Code'}</span>
           </div>
+          <p>{repository.building.value} {repository.building.metric}. {repository.building.next === null ? 'Nível máximo.' : 'Próximo nível: ' + repository.building.next + '.'}</p>
           <a href={repository.html_url} target="_blank" rel="noreferrer">
             Abrir no GitHub ↗
           </a>

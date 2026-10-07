@@ -1,4 +1,8 @@
+import type { Building, Progression } from '../../shared/progression'
+export type { Building } from '../../shared/progression'
+
 export type GitHubUser = {
+  profile_complete?: boolean
   login: string
   name: string | null
   avatar_url: string
@@ -16,13 +20,14 @@ export type GitHubRepository = {
   stargazers_count: number
   forks_count: number
   updated_at: string
-  commit_count: number
+  commit_count: number | null
 }
 
 export type RepositoryIsland = GitHubRepository & {
   position: [number, number, number]
   color: string
   size: number
+  building: Building
 }
 
 export type ShipClass = 'Skiff' | 'Sloop' | 'Brigantine' | 'Frigate' | 'Galleon'
@@ -36,7 +41,8 @@ export type ShipProfile = {
   shipClass: ShipClass
   position: [number, number, number]
   homePosition: [number, number, number]
-  island: { size: number; level: number; commits: number }
+  island: Progression['island']
+  progression: Progression
 }
 
 export type Locale = 'pt-BR' | 'en' | 'es'

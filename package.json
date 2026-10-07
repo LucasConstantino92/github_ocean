@@ -8,6 +8,7 @@
     "dev:web": "vite",
     "dev:api": "tsx watch server/index.ts",
     "check:api": "tsc --noEmit -p server/tsconfig.json",
+    "test:progression": "tsx --test shared/progression.test.ts",
     "db:up": "docker compose up -d postgres",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

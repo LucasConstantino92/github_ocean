@@ -15,6 +15,7 @@ model Developer {
   bio         String?
   publicRepos Int
   followers   Int
+  fullProfile Boolean      @default(false)
   stars       Int          @default(0)
   forks       Int          @default(0)
   languages   Json
@@ -50,6 +51,7 @@ model Repository {
   stars       Int
   forks       Int
   commits     Int       @default(0)
+  commitAuthor String?
   updatedAt   DateTime
   developer   Developer @relation(fields: [developerId], references: [id], onDelete: Cascade)
 

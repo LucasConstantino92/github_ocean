@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import type { GitHubRepository, GitHubUser, Locale, RepositoryIsland, ShipProfile, WorldChunk } from './types/ocean'
+import type { Building, GitHubRepository, GitHubUser, Locale, RepositoryIsland, ShipProfile, WorldChunk } from './types/ocean'
 import { apiUrl, copy, initialGithubLogin } from './utils/constants'
 import { createProfile, worldChunkFor } from './utils/oceanMath'
 import { trackEvent } from './utils/analytics'
@@ -11,10 +11,12 @@ import { SearchCard } from './components/ui/SearchCard'
 import { ProfileCard } from './components/ui/ProfileCard'
 import { RepositoryCard } from './components/ui/RepositoryCard'
 import { MiniMap } from './components/ui/MiniMap'
+import { BuildingCard } from './components/ui/BuildingCard'
 
 import './App.css'
 import './repository.css'
 import './world-layout.css'
+import './progression.css'
 
 export function App() {
   const [username, setUsername] = useState(initialGithubLogin ?? '')
@@ -24,6 +26,7 @@ export function App() {
   const [focusedDeveloper, setFocusedDeveloper] = useState<ShipProfile | null>(null)
   const [githubLogin, setGithubLogin] = useState<string | null>(initialGithubLogin)
   const [selectedRepository, setSelectedRepository] = useState<RepositoryIsland | null>(null)
+  const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null)
   const [locale, setLocale] = useState<Locale>(
     () => (localStorage.getItem('github-ocean-locale') as Locale | null) ?? 'pt-BR'
   )
@@ -77,6 +80,7 @@ export function App() {
           setFocusedDeveloper(nextProfile)
         }
         setSelectedRepository(null)
+        setSelectedBuilding(null)
         setStatus(
           `Porto encontrado: ${user.login} navega como ${nextProfile.shipClass}. Clique nas construções da ilha para abrir os repositórios.`
         )
@@ -168,24 +172,47 @@ export function App() {
 
   const visitDeveloper = useCallback((developer: ShipProfile) => {
     setSelectedRepository(null)
+    setSelectedBuilding(null)
     setSelectedDeveloper(developer)
+    if (developer.user.profile_complete === false) {
+      // Hydrate discovered/legacy ports without entering search/visit camera mode.
+      void fetch(apiUrl(`/api/developers/${encodeURIComponent(developer.user.login)}`))
+        .then(async (response) => {
+          if (!response.ok) throw new Error('Não foi possível atualizar o porto.')
+          return response.json() as Promise<{ user: GitHubUser; repositories: GitHubRepository[]; world_position?: [number, number] }>
+        })
+        .then((data) => {
+          const updated = createProfile(data.user, data.repositories, data.world_position)
+          const login = updated.user.login.toLowerCase()
+          setSelectedDeveloper((current) => current?.user.login.toLowerCase() === login ? updated : current)
+          setWorldProfiles((current) => current.map((item) => item.user.login.toLowerCase() === login ? updated : item))
+        })
+        .catch(() => setStatus('Este porto ainda precisa ser atualizado. Tente pesquisar o usuário novamente.'))
+    }
   }, [])
 
   const visitRepository = useCallback((repository: RepositoryIsland) => {
     trackEvent('repository_opened', { repository: repository.name })
     setSelectedRepository(repository)
+    setSelectedBuilding(null)
+  }, [])
+
+  const visitBuilding = useCallback((building: Building) => {
+    setSelectedRepository(null)
+    setSelectedBuilding(building)
   }, [])
 
   const displayedProfile = selectedDeveloper ?? profile
   const canSail = Boolean(githubLogin && profile && !focusedDeveloper && githubLogin.toLowerCase() === profile.user.login.toLowerCase())
-  const visibleWorldProfiles = focusedDeveloper && !worldProfiles.some((developer) => developer.user.login.toLowerCase() === focusedDeveloper.user.login.toLowerCase())
-    ? [...worldProfiles, focusedDeveloper]
+  const visibleWorldProfiles = focusedDeveloper
+    ? [...worldProfiles.filter((developer) => developer.user.login.toLowerCase() !== focusedDeveloper.user.login.toLowerCase()), focusedDeveloper]
     : worldProfiles
 
   const returnToHome = useCallback(() => {
     setSelectedDeveloper(null)
     setFocusedDeveloper(null)
     setSelectedRepository(null)
+    setSelectedBuilding(null)
     if (profile) setWorldChunk(worldChunkFor(profile.homePosition))
     setReturnHome((value) => value + 1)
   }, [profile])
@@ -201,6 +228,7 @@ export function App() {
           returnHome={returnHome}
           onDeveloperClick={visitDeveloper}
           onRepositoryClick={visitRepository}
+          onBuildingClick={visitBuilding}
           onChunkChange={updateWorldChunk}
           onPositionChange={updatePlayerPosition}
         />
@@ -225,9 +253,10 @@ export function App() {
         locale={locale}
       />
 
-      <ProfileCard profile={displayedProfile} locale={locale} />
+      <ProfileCard profile={displayedProfile} locale={locale} onRepositoryClick={visitRepository} />
 
       <RepositoryCard repository={selectedRepository} onClose={() => setSelectedRepository(null)} />
+      <BuildingCard building={selectedBuilding} onClose={() => setSelectedBuilding(null)} />
 
       {profile && (
         <MiniMap

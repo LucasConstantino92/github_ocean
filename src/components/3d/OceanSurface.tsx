@@ -4,13 +4,15 @@ import * as THREE from 'three'
 
 const oceanVertexShader = `
   uniform float uTime;
+  uniform vec2 uOrigin;
   varying float vWave;
   varying vec2 vUv;
   void main() {
-    vUv = uv;
+    vUv = uv + uOrigin / 650.0;
     vec3 p = position;
-    float broad = sin(p.x * .045 + uTime * .7) * .22 + cos(p.y * .052 - uTime * .55) * .16;
-    float detail = sin((p.x + p.y) * .16 + uTime * 1.4) * .045;
+    vec2 world = p.xy + uOrigin;
+    float broad = sin(world.x * .045 + uTime * .7) * .22 + cos(world.y * .052 - uTime * .55) * .16;
+    float detail = sin((world.x + world.y) * .16 + uTime * 1.4) * .045;
     p.z += broad + detail;
     vWave = broad + detail;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
@@ -35,17 +37,23 @@ const oceanFragmentShader = `
 
 export function OceanSurface() {
   const material = useRef<THREE.ShaderMaterial>(null)
-  useFrame(({ clock }) => {
-    if (material.current) material.current.uniforms.uTime.value = clock.elapsedTime
+  const surface = useRef<THREE.Mesh>(null)
+  useFrame(({ clock, camera }) => {
+    if (!material.current || !surface.current) return
+    const x = Math.floor(camera.position.x / 40) * 40
+    const z = Math.floor(camera.position.z / 40) * 40
+    surface.current.position.set(x, 0, z)
+    material.current.uniforms.uTime.value = clock.elapsedTime
+    material.current.uniforms.uOrigin.value.set(x, -z)
   })
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+    <mesh ref={surface} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
       <planeGeometry args={[650, 650, 128, 128]} />
       <shaderMaterial
         ref={material}
         vertexShader={oceanVertexShader}
         fragmentShader={oceanFragmentShader}
-        uniforms={{ uTime: { value: 0 } }}
+        uniforms={{ uTime: { value: 0 }, uOrigin: { value: new THREE.Vector2() } }}
       />
     </mesh>
   )

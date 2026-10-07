@@ -1,104 +1,238 @@
 # GitHub Ocean
 
-Um mundo 3D navegável em que perfis públicos do GitHub viram barcos e suas tecnologias definem a identidade visual do navio.
+GitHub Ocean is a navigable 3D world where public GitHub profiles become captains, ships, and evolving island ports.
 
-## O que já funciona
+Search for a developer to visit their port, inspect their featured repositories, or sign in with GitHub to sail your own ship through the world. The visual progression is deterministic: the same public profile produces the same ship, port layout, colours, and upgrades everywhere in the application.
 
-- Busca por `username` público usando a API do GitHub.
-- Leitura dos repositórios públicos e suas linguagens principais.
-- Cálculo determinístico do barco: classe, cor da vela e posição são derivados dos dados do perfil.
-- Cena Three.js navegável com câmera orbit, zoom e ilhas iniciais das regiões técnicas.
-- Card do explorador com stack, repositórios, stars e followers.
-- Analytics de abertura, buscas, logins e interesse em repositórios, sem guardar tokens do GitHub.
+## Highlights
 
-## Rodar localmente
+- Interactive Three.js ocean built with React Three Fiber.
+- GitHub OAuth login; tokens stay on the server.
+- Persistent PostgreSQL world with stable port coordinates.
+- Chunk-based loading for nearby ports.
+- First-person-style ship navigation with WASD, right-mouse orbital camera, and scroll zoom.
+- Search travel mode for visiting another developer's port.
+- Clickable repository buildings and progression details.
+- First-party product analytics plus optional Vercel Web Analytics.
+
+## What public GitHub data is used
+
+The application reads public profile and repository data:
+
+- Public repository count and follower count.
+- Repository stars, forks, language, update date, name, and description.
+- Authored commits from the profile owner in up to eight featured repositories.
+
+No private repositories, private contribution data, or GitHub access tokens are stored in the browser.
+
+### Featured repository sample
+
+The API reads up to 100 public repositories. It selects the eight featured repositories by stars, then by most recent update. For those eight repositories, it queries GitHub commits filtered by the profile owner.
+
+That makes the commit metric an observed sample of authored work. It is not presented as the person's total lifetime contribution count. If GitHub cannot provide a commit value, it remains unmeasured and awards no activity points.
+
+## Progression model
+
+All progression is calculated in `shared/progression.ts`, which is used by both the API and the 3D client. This prevents a searched profile and the same profile loaded from a world chunk from receiving different visuals.
+
+### Overall score
+
+The overall score ranges from 0 to 100 and combines five capped axes:
+
+| Axis | Weight | Input | Ceiling used for balancing |
+| --- | ---: | --- | ---: |
+| Projects | 30% | Public repositories | 200 |
+| Activity | 30% | Confirmed authored commits in the sample | 10,000 |
+| Recognition | 20% | Stars in the sampled repositories | 5,000 |
+| Community | 15% | Forks + followers × 0.25 | 1,500 |
+| Diversity | 5% | Distinct repository languages | 12 |
+
+Each axis uses a logarithmic cap:
+
+```text
+axisPoints = min(100, 100 × log(1 + value) / log(1 + ceiling))
+```
+
+This rewards early growth while avoiding giant visual gaps between established profiles. The score is a game-balancing value, not a professional ranking of a developer.
+
+### Ship progression
+
+The ship grows gradually rather than switching between only a few preset models.
+
+| Score | Ship class |
+| ---: | --- |
+| 0–14 | Skiff |
+| 15–31 | Sloop |
+| 32–51 | Brigantine |
+| 52–74 | Frigate |
+| 75–100 | Galleon |
+
+Projects extend the hull and cabin, stars improve trim and decorative details, forks add cargo, and languages determine the sail palette. The GitHub login deterministically chooses wood tone and sail pattern.
+
+Masts unlock at scores 24, 48, and 76, for a maximum of four masts. Extra upper sails unlock with 50, 250, 1,000, and 4,000 confirmed authored commits, limited to one extra sail per mast.
+
+### Crew progression
+
+Crew is based only on confirmed authored commits in the featured-repository sample:
+
+| Confirmed commits | Crew |
+| ---: | ---: |
+| 0–9 | 1 captain |
+| 10–49 | 2 people |
+| 50–149 | 3 people |
+| 150–399 | 4 people |
+| 400–999 | 5 people |
+| 1,000–2,499 | 6 people |
+| 2,500–5,999 | 7 people |
+| 6,000+ | 8 people |
+
+### Island and port progression
+
+An island is made of regular land plots, rather than one uniformly scaled mesh. It begins with four plots and gains one plot for every five overall score points; it expands further whenever necessary to hold every building. The design keeps the island radius below six world units, while ports are reserved at least 12 units apart.
+
+The general island level is:
+
+```text
+islandLevel = 1 + floor(overallScore / 10)
+```
+
+Port upgrades are independent, each with three levels:
+
+| Building | GitHub signal | Levels |
+| --- | --- | --- |
+| Campfire | Confirmed authored commits | 0 / 100 / 1,000 |
+| Settlement | Public repositories | 3 / 15 / 60 |
+| Harbor | Public repositories | 1 / 10 / 40 |
+| Fort | Stars in the sample | 10 / 100 / 1,000 |
+| Treasure market | Forks in the sample | 1 / 20 / 200 |
+
+The eight featured repositories also receive individual, clickable buildings:
+
+- A fort for repositories with at least 10 stars.
+- A treasure market for repositories with at least 2 forks.
+- A campfire for repositories with at least 50 confirmed commits.
+- A settlement for all remaining featured repositories.
+
+Click a repository building to open its details and its GitHub URL. Click a shared port upgrade to see its source metric and the next unlock threshold.
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| `W` / `S` | Accelerate / reverse |
+| `A` / `D` | Steer |
+| Right mouse drag | Orbit camera around the player's ship |
+| Mouse wheel | Zoom |
+| Search | Travel to a developer's port |
+| Go to my port | Return to the signed-in captain and re-enable sailing |
+
+## Local development
+
+### Requirements
+
+- Node.js 20 or newer.
+- Docker Desktop, for the local PostgreSQL database.
+- A GitHub OAuth App if you want to test login.
+- A GitHub token is recommended for higher API limits.
+
+### Setup
 
 ```bash
 npm install
+copy .env.example .env
 npm run db:up
-npm run db:migrate -- --name initial_world
-npm run db:generate
+npm run db:deploy
 npm run dev
 ```
 
-Abra o endereço mostrado pelo Vite e procure um usuário do GitHub. O comando inicia o frontend, a API Node e o indexador contínuo juntos.
+Open the Vite URL shown in the terminal.
 
-### Banco e mundo por regiões
+Run the progression tests independently with:
 
-O mundo agora usa PostgreSQL, iniciado localmente com Docker Compose. O backend reserva uma posição única de porto para cada desenvolvedor, mantém os repositórios e fornece `GET /api/world/chunks/:x/:z` para o frontend carregar apenas a região necessária.
+```bash
+npm run test:progression
+```
 
-O indexador contínuo percorre a listagem pública do GitHub e mantém seu cursor em `data/public-indexer.json`. Ele começa sozinho com `npm run dev`, portanto não há mais lote manual de 100 em 100. Com `GITHUB_TOKEN`, ele adiciona aproximadamente um perfil a cada 9 segundos; sem token, reduz muito a velocidade para respeitar o limite público.
+## Environment variables
 
-Para rodá-lo sem abrir o frontend:
+Copy `.env.example` to `.env` and set values locally. Never commit `.env`, OAuth secrets, database URLs, or production tokens.
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `PORT` | Local API port |
+| `WEB_ORIGIN` | Frontend origin allowed by the API |
+| `API_ORIGIN` | Public API origin used by the OAuth callback |
+| `GITHUB_TOKEN` | Optional GitHub API token for higher rate limits |
+| `GITHUB_CLIENT_ID` | GitHub OAuth App client ID |
+| `GITHUB_CLIENT_SECRET` | GitHub OAuth App secret |
+| `SESSION_SECRET` | Secret used to sign login sessions in production |
+| `CRON_SECRET` | Secret used by the protected world-indexing cron route |
+| `ANALYTICS_SECRET` | Secret used to read the private analytics summary |
+| `VITE_API_ORIGIN` | Optional separate API origin; leave empty for same-domain deployments |
+
+For local OAuth, register:
+
+```text
+http://localhost:3001/api/auth/callback
+```
+
+as the Authorization callback URL in the GitHub OAuth App.
+
+## Database and world indexing
+
+The server stores developers, repositories, ports, analytics events, and indexer state in PostgreSQL. A developer's port coordinate is allocated once and remains stable after later profile updates.
+
+The optional continuous local indexer can be run with:
 
 ```bash
 npm run world:index
 ```
 
-### Token do GitHub (recomendado)
+The Vercel-ready alternative is a protected daily Cron endpoint at `/api/cron/index-world`. It indexes a small batch per run and keeps its cursor in the database.
 
-Copie `.env.example` para `.env` e preencha `GITHUB_TOKEN` com um fine-grained token sem permissões extras. Ele fica apenas na sua máquina e aumenta o limite da API. Sem token, o projeto ainda funciona dentro do limite público do GitHub.
+## Analytics
 
-### Login com GitHub
+The project tracks:
 
-1. Em `https://github.com/settings/developers`, crie uma **OAuth App**.
-2. Use `GitHub Ocean Local` como nome e `http://localhost:3001/api/auth/callback` como **Authorization callback URL**.
-3. Copie o Client ID e gere um Client Secret.
-4. No `.env`, preencha `GITHUB_CLIENT_ID` e `GITHUB_CLIENT_SECRET`.
+- Application opens.
+- Developer searches and successful profile loads.
+- GitHub login starts and completions.
+- Repository building opens.
 
-Ao clicar em **Entrar com GitHub**, o backend realiza o OAuth e o navegador volta diretamente para o porto do usuário. O secret fica só no backend e o token não é exposto ao frontend.
+Client events use a random anonymous browser identifier. GitHub OAuth tokens are never sent to the client and are not stored in analytics events.
 
-As sessões são assinadas com `SESSION_SECRET`, portanto continuam válidas mesmo quando uma função de produção reinicia. Para desenvolvimento, existe uma chave local automática; em produção a variável é obrigatória.
-
-### Analytics do MVP
-
-O frontend usa o Web Analytics da Vercel para pageviews e registra no PostgreSQL os eventos importantes do produto: abertura da aplicação, busca, perfil carregado, login concluído e abertura de repositório. O identificador anônimo é aleatório e fica no navegador; nenhum access token do GitHub é salvo.
-
-Após aplicar a migration, um resumo dos últimos 30 dias fica disponível em:
+The protected 30-day summary is available from the API:
 
 ```bash
-curl -H "Authorization: Bearer SEU_ANALYTICS_SECRET" http://localhost:3001/api/analytics/summary
+curl -H "Authorization: Bearer YOUR_ANALYTICS_SECRET" \
+  http://localhost:3001/api/analytics/summary
 ```
 
-### Preparação para produção
+## Deployment
 
-O projeto inclui uma função serverless para a API e um Cron diário que indexa até oito perfis por execução. Antes de publicar:
+The repository includes `vercel.json` with the frontend build, API rewrite, and daily indexing Cron schedule.
 
-1. Use um PostgreSQL gerenciado e configure `DATABASE_URL`.
-2. Rode `npm run db:deploy` contra esse banco.
-3. Configure `WEB_ORIGIN` e `API_ORIGIN` com a URL pública HTTPS.
-4. Configure `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, `CRON_SECRET` e `ANALYTICS_SECRET`.
-5. Na OAuth App do GitHub, cadastre `https://SEU-DOMINIO/api/auth/callback` como callback.
+Before deploying:
 
-`VITE_API_ORIGIN` deve ficar vazio quando site e API usam o mesmo domínio. O arquivo `vercel.json` já contém o build, o encaminhamento `/api` e o agendamento diário.
+1. Create a managed PostgreSQL database.
+2. Run `npm run db:deploy` against it.
+3. Configure the production environment variables in the hosting dashboard.
+4. Register `https://YOUR_DOMAIN/api/auth/callback` in the GitHub OAuth App.
+5. Enable Vercel Web Analytics in the project dashboard if desired.
 
-As oito ilhas mais relevantes recebem uma contagem de commits via API. Ela é cacheada por 15 minutos no servidor para reduzir chamadas. O tamanho visual da ilha combina commits, stars e forks, sempre com limite máximo para preservar o mapa.
+Do not paste secrets into issues, pull requests, screenshots, or this README.
 
-### Mundo persistente e posições fixas
+## Project structure
 
-Cada perfil pesquisado entra no PostgreSQL e recebe uma posição única e estável, derivada do login do GitHub. A separação entre células é propositalmente maior que o tamanho máximo da ilha: upgrades visuais nunca invadem o território vizinho.
-
-Se você já tinha criado portos na versão anterior, execute uma vez para redistribuí-los em um arquipélago compacto sem apagar nada:
-
-```bash
-npm run world:relayout
+```text
+src/                   React application and 3D scene
+server/                Express API, GitHub sync, workers, security
+shared/progression.ts  Shared deterministic progression rules
+prisma/                Database schema and migrations
+api/                   Serverless API entry point
 ```
 
-### Ilha-porto do desenvolvedor
+## License
 
-Cada desenvolvedor agora possui somente uma ilha-porto. Ela aumenta conforme commits, repositórios e stars; os repositórios alimentam o progresso do território em vez de criarem ilhas aleatórias. O visual evolui de acampamento para vila, loja e forte — a base para futuras personalizações e exploração marítima.
-
-| Nível | Evolução | Critério visual |
-| --- | --- | --- |
-| 1 | Acampamento | Ilha pequena e primeiro repositório como construção |
-| 2 | Assentamento | Segunda construção vinculada ao segundo repositório |
-| 3 | Vila comercial | Terceiro repositório ganha uma loja/oficina |
-| 4 | Porto fortificado | Quarto repositório vira a torre/forte da ilha |
-
-O nível e o tamanho usam uma pontuação limitada de commits, stars e quantidade de repositórios. Cada construção pode ser clicada para abrir o repositório que a representa. A costa tem tamanho máximo; depois dele, os ganhos evoluem assentamento, mercado e forte, sem expandir lateralmente.
-
-## Próxima evolução planejada
-
-1. Painel visual privado para consultar as métricas sem usar a rota manual.
-2. Rate limiting distribuído antes de uma divulgação maior.
-3. Rotas de pull requests, organizações e contribuições para enriquecer a evolução.
+Private project. Add a license before distributing the source code publicly.

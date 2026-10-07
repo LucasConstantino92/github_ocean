@@ -20,8 +20,7 @@ export function Ship({
   isPlayerControlled?: boolean
 }) {
   const color = profile.languages[0]?.color ?? '#d5a34c'
-  const size = { Skiff: 0.65, Sloop: 0.85, Brigantine: 1.05, Frigate: 1.25, Galleon: 1.5 }[profile.shipClass]
-  const masts = profile.shipClass === 'Skiff' ? 1 : profile.shipClass === 'Sloop' ? 1 : profile.shipClass === 'Brigantine' ? 2 : profile.shipClass === 'Frigate' ? 2 : 3
+  const { size, masts, sails, crew, hullLength, hullWidth, cabinLevel, trimLevel, cargo, wood, sailPattern } = profile.progression.ship
   const bob = useRef<THREE.Group>(null)
   const sailsRef = useRef<(THREE.Mesh | null)[]>([])
   const flagRef = useRef<THREE.Mesh>(null)
@@ -42,7 +41,7 @@ export function Ship({
     if (!isPlayerControlled && bob.current) {
       const [baseX, , baseZ] = position ?? profile.position
       const waveH = getOceanWaveHeight(baseX, baseZ, oceanTime)
-      bob.current.position.y = waveH / size + shipWaterlineOffset
+      bob.current.position.y = (waveH + shipWaterlineOffset) / size
       const bowH = getOceanWaveHeight(baseX + 0.8, baseZ, oceanTime)
       const sternH = getOceanWaveHeight(baseX - 0.8, baseZ, oceanTime)
       const rightH = getOceanWaveHeight(baseX, baseZ + 0.4, oceanTime)
@@ -96,23 +95,45 @@ export function Ship({
       <group ref={bob}>
         {/* Casco */}
         <mesh position={[0, 0.2, 0]} castShadow>
-          <boxGeometry args={[1.35 + masts * 0.18, 0.35 + masts * 0.03, 0.58 + masts * 0.05]} />
-          <meshStandardMaterial color={profile.shipClass === 'Galleon' ? '#3b2017' : '#4a2617'} roughness={0.82} />
+          <boxGeometry args={[hullLength, .35 + cabinLevel * .025, hullWidth]} />
+          <meshStandardMaterial color={wood} roughness={0.82} />
         </mesh>
         {/* Bico de proa */}
-        <mesh position={[0.7 + masts * 0.09, 0.22, 0]} rotation={[0, 0, -Math.PI / 8]} castShadow>
-          <coneGeometry args={[0.26, 0.55, 4]} />
+        <mesh position={[hullLength / 2, .22, 0]} rotation={[0, 0, -Math.PI / 2]} castShadow>
+          <coneGeometry args={[hullWidth * .56, .7, 4]} />
           <meshStandardMaterial color="#5c301c" />
         </mesh>
-        <mesh position={[0, 0.35, 0]} rotation={[Math.PI / 4, Math.PI / 4, 0]} castShadow>
-          <coneGeometry args={[0.32, 0.32, 4]} />
-          <meshStandardMaterial color="#6e3821" />
-        </mesh>
+        <mesh position={[0, .4, 0]}><boxGeometry args={[hullLength * .96, .06, hullWidth * .92]} /><meshStandardMaterial color="#bb9564" /></mesh>
+        {[-1, 1].map((side) => <group key={side}>
+          <mesh position={[0, .5, side * hullWidth / 2]}><boxGeometry args={[hullLength, .09, .045]} /><meshStandardMaterial color={trimLevel ? '#d4aa58' : wood} /></mesh>
+          {Array.from({ length: trimLevel + 1 }, (_, i) => <mesh key={i} position={[-hullLength * .32 + i * .28, .22, side * (hullWidth / 2 + .012)]}>
+            <boxGeometry args={[.12, .12, .03]} /><meshStandardMaterial color={trimLevel >= 2 ? '#ebc66e' : '#243746'} />
+          </mesh>)}
+        </group>)}
+        {cabinLevel > 0 && <group position={[-hullLength * .36, .43, 0]}>
+          <mesh position={[0, .12 + cabinLevel * .055, 0]} castShadow><boxGeometry args={[.42, .24 + cabinLevel * .11, hullWidth * .72]} /><meshStandardMaterial color={wood} /></mesh>
+          <mesh position={[0, .27 + cabinLevel * .11, 0]}><boxGeometry args={[.5, .06, hullWidth * .82]} /><meshStandardMaterial color={color} /></mesh>
+          {cabinLevel >= 2 && <mesh position={[.216, .23, 0]}><boxGeometry args={[.015, .12, .2]} /><meshStandardMaterial color="#f9d78a" /></mesh>}
+        </group>}
+        {Array.from({ length: cargo }, (_, i) => <mesh key={i} position={[hullLength * .3 - i * .23, .53, -hullWidth * .22]} castShadow>
+          <boxGeometry args={[.18, .2, .18]} /><meshStandardMaterial color="#ac7f3c" />
+        </mesh>)}
+        {Array.from({ length: crew }, (_, i) => {
+          const side = i % 2 ? 1 : -1
+          const row = Math.floor(i / 2)
+          const x = -.15 * hullLength + row * hullLength * .17
+          const uniform = profile.languages[i % Math.max(profile.languages.length, 1)]?.color ?? color
+          return <group key={i} position={[x, .44, side * hullWidth * .3]}>
+            <mesh position={[0, .12, 0]} castShadow><cylinderGeometry args={[.065, .08, .22, 5]} /><meshStandardMaterial color={uniform} /></mesh>
+            <mesh position={[0, .28, 0]}><sphereGeometry args={[.075, 6, 5]} /><meshStandardMaterial color={i % 2 ? '#c79267' : '#e8b58c'} /></mesh>
+            {i === 0 && <mesh position={[0, .35, 0]}><boxGeometry args={[.19, .06, .15]} /><meshStandardMaterial color="#243445" /></mesh>}
+          </group>
+        })}
 
         {/* Mastros e Velas */}
         {Array.from({ length: masts }, (_, index) => {
-          const mastX = (index - (masts - 1) / 2) * 0.5
-          const mastH = 1.65 + index * 0.14
+          const mastX = (index - (masts - 1) / 2) * (hullLength * .65 / Math.max(masts - 1, 1))
+          const mastH = 1.9 + index * 0.14
           const isMainMast = index === masts - 1
           return (
             <group key={index} position={[mastX, 0, 0]}>
@@ -121,6 +142,13 @@ export function Ship({
                 <cylinderGeometry args={[0.035, 0.055, mastH]} />
                 <meshStandardMaterial color="#31190e" />
               </mesh>
+              {index < sails - masts && <mesh
+                ref={(el) => { sailsRef.current[masts + index] = el }}
+                position={[.18, 1.94 + index * .08, 0]}
+                castShadow>
+                <planeGeometry args={[.4 + index * .035, .42]} />
+                <meshStandardMaterial color={profile.languages[(index + 1) % Math.max(profile.languages.length, 1)]?.color ?? '#eee3c9'} side={THREE.DoubleSide} />
+              </mesh>}
               {/* Verga superior (cruzeta de madeira que sustenta a vela) */}
               <mesh position={[0.18, 1.8 + index * 0.08, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
                 <cylinderGeometry args={[0.02, 0.02, 0.62 + index * 0.08]} />
@@ -141,12 +169,16 @@ export function Ship({
                   side={THREE.DoubleSide}
                   roughness={0.7}
                 />
+                <mesh position={[0, 0, .008]}>
+                  <planeGeometry args={sailPattern === 0 ? [.1, .68] : sailPattern === 1 ? [.4, .08] : [.19, .19]} />
+                  <meshStandardMaterial color={trimLevel >= 2 ? '#f4ce78' : '#ac8651'} side={THREE.DoubleSide} />
+                </mesh>
               </mesh>
               {/* Flâmula no topo do mastro principal */}
               {isMainMast && (
                 <mesh
                   ref={flagRef}
-                  position={[-0.14, 1.95 + index * 0.08, 0]}
+                  position={[-0.14, 2.25 + index * 0.08, 0]}
                   rotation={[0, 0, 0]}
                 >
                   <coneGeometry args={[0.08, 0.32, 3]} />
@@ -158,18 +190,18 @@ export function Ship({
         })}
 
         {/* Espuma de corte de proa (Bow splash) */}
-        <mesh position={[0.72 + masts * 0.08, 0.04, 0.24]} rotation={[-Math.PI / 2, 0.2, 0.4]}>
+        <mesh position={[hullLength / 2, 0.04, hullWidth / 2]} rotation={[-Math.PI / 2, 0.2, 0.4]}>
           <planeGeometry args={[0.65, 0.22]} />
           <meshBasicMaterial ref={bowSplashLeft} color="#dcf8ff" transparent opacity={0} depthWrite={false} />
         </mesh>
-        <mesh position={[0.72 + masts * 0.08, 0.04, -0.24]} rotation={[-Math.PI / 2, -0.2, -0.4]}>
+        <mesh position={[hullLength / 2, 0.04, -hullWidth / 2]} rotation={[-Math.PI / 2, -0.2, -0.4]}>
           <planeGeometry args={[0.65, 0.22]} />
           <meshBasicMaterial ref={bowSplashRight} color="#dcf8ff" transparent opacity={0} depthWrite={false} />
         </mesh>
       </group>
 
       {/* Rastro imediato na popa */}
-      <mesh position={[-1.35, 0.025, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[-hullLength / 2 - .8, 0.025, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[2.2, 0.72]} />
         <meshBasicMaterial ref={wake} color="#b9efff" transparent opacity={0.2} depthWrite={false} />
       </mesh>

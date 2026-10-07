@@ -4,14 +4,15 @@ import express from 'express'
 import { randomBytes } from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
 import { cookie, readCookie, sameValue, signToken, verifyToken } from './security.js'
+import { calculateProgression, rankedRepositories } from '../shared/progression.js'
 
 type GitHubRepository = { name: string; full_name: string; html_url: string; description: string | null; language: string | null; stargazers_count: number; forks_count: number; updated_at: string }
-type WorldRepository = GitHubRepository & { commit_count: number }
+type WorldRepository = GitHubRepository & { commit_count: number | null }
 type WorldProfile = { user: { login: string; name: string | null; avatar_url: string; bio: string | null; public_repos: number; followers: number }; repositories: WorldRepository[]; cached: boolean }
 type GitHubNeighbor = { login: string; avatar_url: string; html_url: string }
 type CachedDeveloper = { expiresAt: number; value: WorldProfile & { world_position: WorldPosition } }
-type StoredRepository = { name: string; fullName: string; githubUrl: string; description: string | null; language: string | null; stars: number; forks: number; commits: number; updatedAt: Date }
-type StoredDeveloper = { githubLogin: string; name: string | null; avatarUrl: string; bio: string | null; publicRepos: number; followers: number; port: { worldX: number; worldZ: number } | null; repositories: StoredRepository[] }
+type StoredRepository = { name: string; fullName: string; githubUrl: string; description: string | null; language: string | null; stars: number; forks: number; commits: number; commitAuthor: string | null; updatedAt: Date }
+type StoredDeveloper = { githubLogin: string; fullProfile: boolean; name: string | null; avatarUrl: string; bio: string | null; publicRepos: number; followers: number; port: { worldX: number; worldZ: number } | null; repositories: StoredRepository[] }
 type SessionPayload = { login: string; avatarUrl: string; exp: number }
 type OAuthStatePayload = { nonce: string; exp: number }
 type AnalyticsEventType = 'app_opened' | 'developer_searched' | 'developer_loaded' | 'repository_opened' | 'login_started' | 'login_succeeded'
@@ -82,11 +83,9 @@ async function availablePosition(login: string): Promise<WorldPosition> {
 
 function toWorldDeveloper(developer: StoredDeveloper) {
   const repositories = [...developer.repositories]
-    .sort((a, b) => b.stars - a.stars || b.updatedAt.getTime() - a.updatedAt.getTime())
-    .slice(0, 8)
   return {
-    user: { login: developer.githubLogin, name: developer.name, avatar_url: developer.avatarUrl, bio: developer.bio, public_repos: developer.publicRepos, followers: developer.followers },
-    repositories: repositories.map((repository) => ({ name: repository.name, full_name: repository.fullName, html_url: repository.githubUrl, description: repository.description, language: repository.language, stargazers_count: repository.stars, forks_count: repository.forks, updated_at: repository.updatedAt.toISOString(), commit_count: repository.commits })),
+    user: { login: developer.githubLogin, name: developer.name, avatar_url: developer.avatarUrl, html_url: `https://github.com/${developer.githubLogin}`, bio: developer.bio, public_repos: developer.publicRepos, followers: developer.followers, profile_complete: developer.fullProfile },
+    repositories: repositories.map((repository) => ({ name: repository.name, full_name: repository.fullName, html_url: repository.githubUrl, description: repository.description, language: repository.language, stargazers_count: repository.stars, forks_count: repository.forks, updated_at: repository.updatedAt.toISOString(), commit_count: repository.commitAuthor === developer.githubLogin.toLowerCase() ? repository.commits : null })),
     world_position: [developer.port?.worldX ?? 0, developer.port?.worldZ ?? 0] as WorldPosition,
   }
 }
@@ -94,19 +93,20 @@ async function saveDeveloper(profile: WorldProfile) {
   const { user, repositories } = profile
   const stars = repositories.reduce((sum, repository) => sum + repository.stargazers_count, 0)
   const forks = repositories.reduce((sum, repository) => sum + repository.forks_count, 0)
-  const commits = repositories.reduce((sum, repository) => sum + repository.commit_count, 0)
+  const progression = calculateProgression(user, repositories)
+  const commits = progression.commits
   const languageCounts = repositories.reduce<Record<string, number>>((all, repository) => { if (repository.language) all[repository.language] = (all[repository.language] ?? 0) + 1; return all }, {})
-  const islandScore = Math.log10(Math.max(commits, 1)) + Math.log10(stars + 1) * .7 + Math.log10(user.public_repos + 1) * .5
-  const islandSize = Math.min(1.7, Math.max(.72, .72 + islandScore * .22))
-  const islandLevel = islandScore < 1.2 ? 1 : islandScore < 2.2 ? 2 : islandScore < 3.2 ? 3 : 4
-  const shipScore = user.public_repos * 2 + stars * 3 + user.followers
-  const shipClass = shipScore < 15 ? 'Skiff' : shipScore < 50 ? 'Sloop' : shipScore < 150 ? 'Brigantine' : shipScore < 500 ? 'Frigate' : 'Galleon'
+  const islandSize = progression.island.size
+  const islandLevel = progression.island.level
+  const shipClass = progression.shipClass
   const existing = await prisma.developer.findUnique({ where: { githubLogin: user.login.toLowerCase() }, include: { port: true } })
   const position = existing?.port ? [existing.port.worldX, existing.port.worldZ] as WorldPosition : await availablePosition(user.login)
-  const developer = await prisma.developer.upsert({ where: { githubLogin: user.login.toLowerCase() }, create: { githubLogin: user.login.toLowerCase(), name: user.name, avatarUrl: user.avatar_url, bio: user.bio, publicRepos: user.public_repos, followers: user.followers, stars, forks, languages: languageCounts }, update: { name: user.name, avatarUrl: user.avatar_url, bio: user.bio, publicRepos: user.public_repos, followers: user.followers, stars, forks, languages: languageCounts } })
+  const developer = await prisma.developer.upsert({ where: { githubLogin: user.login.toLowerCase() }, create: { githubLogin: user.login.toLowerCase(), fullProfile: true, name: user.name, avatarUrl: user.avatar_url, bio: user.bio, publicRepos: user.public_repos, followers: user.followers, stars, forks, languages: languageCounts }, update: { fullProfile: true, name: user.name, avatarUrl: user.avatar_url, bio: user.bio, publicRepos: user.public_repos, followers: user.followers, stars, forks, languages: languageCounts } })
   await prisma.port.upsert({ where: { developerId: developer.id }, create: { developerId: developer.id, worldX: position[0], worldZ: position[1], islandSize, islandLevel, totalCommits: commits, shipClass }, update: { islandSize, islandLevel, totalCommits: commits, shipClass } })
-  await prisma.repository.deleteMany({ where: { developerId: developer.id } })
-  await prisma.repository.createMany({ data: repositories.map((repository) => ({ developerId: developer.id, githubUrl: repository.html_url, name: repository.name, fullName: repository.full_name, description: repository.description, language: repository.language, stars: repository.stargazers_count, forks: repository.forks_count, commits: repository.commit_count, updatedAt: new Date(repository.updated_at) })) })
+  await prisma.$transaction([
+    prisma.repository.deleteMany({ where: { developerId: developer.id } }),
+    prisma.repository.createMany({ data: repositories.map((repository) => ({ developerId: developer.id, githubUrl: repository.html_url, name: repository.name, fullName: repository.full_name, description: repository.description, language: repository.language, stars: repository.stargazers_count, forks: repository.forks_count, commits: repository.commit_count ?? 0, commitAuthor: repository.commit_count === null ? null : user.login.toLowerCase(), updatedAt: new Date(repository.updated_at) })) }),
+  ])
   return position
 }
 
@@ -250,12 +250,13 @@ async function github(path: string) {
   return response
 }
 
-async function getCommitCount(repository: GitHubRepository) {
+async function getCommitCount(repository: GitHubRepository, username: string): Promise<number | null> {
   try {
-    const response = await github(`/repos/${repository.full_name}/commits?per_page=1`)
+    const response = await github(`/repos/${repository.full_name}/commits?author=${encodeURIComponent(username)}&per_page=1`)
     const lastPage = response.headers.get('link')?.match(/[?&]page=(\d+)>; rel="last"/)?.[1]
-    return lastPage ? Number(lastPage) : 1
-  } catch { return 0 }
+    const entries = await response.json() as unknown[]
+    return lastPage ? Number(lastPage) : entries.length
+  } catch { return null }
 }
 
 async function syncDeveloper(username: string, discover = true) {
@@ -264,20 +265,23 @@ async function syncDeveloper(username: string, discover = true) {
   if (cached && cached.expiresAt > Date.now()) return { ...cached.value, cached: true }
   const [userResponse, reposResponse] = await Promise.all([github(`/users/${encodeURIComponent(normalizedUsername)}`), github(`/users/${encodeURIComponent(normalizedUsername)}/repos?per_page=100&sort=updated`)])
   const user = await userResponse.json()
+  user.profile_complete = true
   const repositories = await reposResponse.json() as GitHubRepository[]
-  const relevantRepositories = [...repositories].sort((a, b) => b.stargazers_count - a.stargazers_count || Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 8)
-  const commitCounts = await Promise.all(relevantRepositories.map(async (repository) => [repository.html_url, await getCommitCount(repository)] as const))
+  const relevantRepositories = rankedRepositories(repositories.map((repo) => ({ ...repo, commit_count: null }))).slice(0, 8)
+  const commitCounts = await Promise.all(relevantRepositories.map(async (repository) => [repository.html_url, await getCommitCount(repository, user.login)] as const))
   const commitsByUrl = new Map(commitCounts)
-  const baseValue = { user, repositories: repositories.map((repository) => ({ ...repository, commit_count: commitsByUrl.get(repository.html_url) ?? 0 })), cached: false }
+  const baseValue = { user, repositories: repositories.map((repository) => ({ ...repository, commit_count: commitsByUrl.get(repository.html_url) ?? null })), cached: false }
   let position: WorldPosition
+  let persisted = false
   try {
     position = await saveDeveloper(baseValue)
+    persisted = true
     if (discover) void discoverNeighbors(user.login)
   } catch {
     position = fallbackPosition(user.login)
   }
   const value = { ...baseValue, world_position: position }
-  cache.set(normalizedUsername, { value, expiresAt: Date.now() + cacheTtlMs })
+  if (persisted) cache.set(normalizedUsername, { value, expiresAt: Date.now() + cacheTtlMs })
   return value
 }
 

@@ -2,7 +2,7 @@ import { useRef } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import type { RepositoryIsland, ShipProfile, WorldChunk } from '../../types/ocean'
+import type { Building, RepositoryIsland, ShipProfile, WorldChunk } from '../../types/ocean'
 import { OceanSurface } from './OceanSurface'
 import { WorldPort } from './WorldPort'
 import { HomeIsland } from './Island'
@@ -18,6 +18,7 @@ export function OceanScene({
   returnHome,
   onDeveloperClick,
   onRepositoryClick,
+  onBuildingClick,
   onChunkChange,
   onPositionChange,
 }: {
@@ -28,6 +29,7 @@ export function OceanScene({
   returnHome: number
   onDeveloperClick: (developer: ShipProfile) => void
   onRepositoryClick: (repository: RepositoryIsland) => void
+  onBuildingClick: (building: Building) => void
   onChunkChange: (chunk: WorldChunk) => void
   onPositionChange: (position: [number, number, number]) => void
 }) {
@@ -53,11 +55,12 @@ export function OceanScene({
             developer={developer}
             onDeveloperClick={onDeveloperClick}
             onRepositoryClick={onRepositoryClick}
+            onBuildingClick={onBuildingClick}
           />
         ))}
       {profile && (
         <>
-          <HomeIsland profile={profile} onRepositoryClick={onRepositoryClick} />
+          <HomeIsland profile={profile} onRepositoryClick={onRepositoryClick} onBuildingClick={onBuildingClick} />
           {canSail ? (
             <PlayerNavigator
               profile={profile}
