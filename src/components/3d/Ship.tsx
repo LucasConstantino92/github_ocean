@@ -1,16 +1,17 @@
-import { useRef } from 'react'
+import { memo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { ShipProfile } from '../../types/ocean'
 import { hash, getOceanWaveHeight, playerSailingMetrics, shipWaterlineOffset } from '../../utils/oceanMath'
 
-export function Ship({
+export const Ship = memo(function Ship({
   profile,
   onClick,
   shipRef,
   position,
   rotation,
   isPlayerControlled = false,
+  animate = true,
 }: {
   profile: ShipProfile
   onClick?: () => void
@@ -18,6 +19,7 @@ export function Ship({
   position?: [number, number, number]
   rotation?: number
   isPlayerControlled?: boolean
+  animate?: boolean
 }) {
   const color = profile.languages[0]?.color ?? '#d5a34c'
   const { size, masts, sails, crew, hullLength, hullWidth, cabinLevel, trimLevel, cargo, wood, sailPattern } = profile.progression.ship
@@ -28,8 +30,15 @@ export function Ship({
   const bowSplashRight = useRef<THREE.MeshBasicMaterial>(null)
   const wake = useRef<THREE.MeshBasicMaterial>(null)
   const phase = (hash(profile.user.login) % 100) / 17
+  // Do not hand transform ownership back to React for the local vessel. It is
+  // moved by PlayerNavigator's frame loop, so a parent reconciliation must not
+  // even receive `undefined` position/rotation props to reconcile.
+  const staticTransform = isPlayerControlled
+    ? {}
+    : { position: position ?? profile.position, rotation: [0, rotation ?? -0.35, 0] as [number, number, number] }
 
   useFrame(({ clock }) => {
+    if (!animate) return
     const oceanTime = clock.elapsedTime
     const animationTime = oceanTime + phase
     const speed = isPlayerControlled ? playerSailingMetrics.speed : 0
@@ -76,7 +85,7 @@ export function Ship({
 
     if (wake.current) {
       wake.current.opacity = isPlayerControlled
-        ? Math.min(absSpeed / 3.0, 0.35)
+        ? Math.min(absSpeed / 3.0, .16)
         : 0.12 + (Math.sin(animationTime * 2.1) + 1) * 0.05
     }
   })
@@ -84,8 +93,10 @@ export function Ship({
   return (
     <group
       ref={shipRef}
-      position={position ?? profile.position}
-      rotation={[0, rotation ?? -0.35, 0]}
+      // The player navigator owns this transform imperatively every frame.
+      // Keeping it uncontrolled prevents a React update (minimap, UI, etc.)
+      // from snapping the ship back to its spawn position for one frame.
+      {...staticTransform}
       scale={size}
       onClick={(event) => {
         event.stopPropagation()
@@ -123,7 +134,7 @@ export function Ship({
           const row = Math.floor(i / 2)
           const x = -.15 * hullLength + row * hullLength * .17
           const uniform = profile.languages[i % Math.max(profile.languages.length, 1)]?.color ?? color
-          return <group key={i} position={[x, .44, side * hullWidth * .3]}>
+          return <group key={i} position={[x, .44, side * hullWidth * .3]} scale={1 / size}>
             <mesh position={[0, .12, 0]} castShadow><cylinderGeometry args={[.065, .08, .22, 5]} /><meshStandardMaterial color={uniform} /></mesh>
             <mesh position={[0, .28, 0]}><sphereGeometry args={[.075, 6, 5]} /><meshStandardMaterial color={i % 2 ? '#c79267' : '#e8b58c'} /></mesh>
             {i === 0 && <mesh position={[0, .35, 0]}><boxGeometry args={[.19, .06, .15]} /><meshStandardMaterial color="#243445" /></mesh>}
@@ -207,4 +218,4 @@ export function Ship({
       </mesh>
     </group>
   )
-}
+})

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import * as THREE from 'three'
@@ -130,26 +130,39 @@ function CentralManor({ land, color }: { land: Landmass; color: string }) {
 }
 
 function PortResidents({ land, count, seed }: { land: Landmass; count: number; seed: number }) {
-  const residents = useRef<(THREE.Group | null)[]>([])
+  const bodies = useRef<THREE.InstancedMesh>(null)
+  const heads = useRef<THREE.InstancedMesh>(null)
+  const dummy = useRef(new THREE.Object3D())
   useFrame(({ clock }) => {
+    const marker = dummy.current
     for (let index = 0; index < count; index++) {
-      const resident = residents.current[index]
-      if (!resident) continue
       const phase = clock.elapsedTime * (.35 + (index % 3) * .06) + seed * .01 + index * 1.73
       const radius = land.radius * (.28 + (index % 2) * .13)
-      resident.position.set(
+      marker.position.set(
         land.x + Math.cos(phase) * radius * land.stretch,
         .64 + land.height * .24 + Math.abs(Math.sin(phase * 2)) * .018,
         land.z + Math.sin(phase) * radius
       )
-      resident.rotation.y = -phase + Math.PI / 2
+      marker.rotation.set(0, -phase + Math.PI / 2, 0)
+      marker.position.y += .13
+      marker.updateMatrix()
+      bodies.current?.setMatrixAt(index, marker.matrix)
+      marker.position.y += .19
+      marker.updateMatrix()
+      heads.current?.setMatrixAt(index, marker.matrix)
     }
+    if (bodies.current) bodies.current.instanceMatrix.needsUpdate = true
+    if (heads.current) heads.current.instanceMatrix.needsUpdate = true
   })
   return <>
-    {Array.from({ length: count }, (_, index) => <group key={index} ref={(element) => { residents.current[index] = element }}>
-      <mesh position={[0, .13, 0]} castShadow><cylinderGeometry args={[.055, .075, .26, 5]} /><meshStandardMaterial color={index % 3 === 0 ? '#c46a48' : index % 3 === 1 ? '#4c7890' : '#d3a44f'} /></mesh>
-      <mesh position={[0, .32, 0]} castShadow><sphereGeometry args={[.07, 6, 5]} /><meshStandardMaterial color="#d9a478" /></mesh>
-    </group>)}
+    <instancedMesh ref={bodies} args={[undefined, undefined, count]} castShadow>
+      <cylinderGeometry args={[.055, .075, .26, 5]} />
+      <meshStandardMaterial color="#4c7890" />
+    </instancedMesh>
+    <instancedMesh ref={heads} args={[undefined, undefined, count]} castShadow>
+      <sphereGeometry args={[.07, 6, 5]} />
+      <meshStandardMaterial color="#d9a478" />
+    </instancedMesh>
   </>
 }
 
@@ -179,11 +192,56 @@ function NightPortLights({ buildings }: { buildings: Building[] }) {
   </group>
 }
 
-export function HomeIsland({ profile, onClick, onRepositoryClick, onBuildingClick, isNight = false }: {
+function DockingPier({ profile }: { profile: ShipProfile }) {
+  const x = profile.position[0] - profile.homePosition[0]
+  const z = profile.position[2] - profile.homePosition[2]
+  return <group position={[x, .12, z]}>
+    {/* A short pier reaches toward the anchored ship without intersecting it. */}
+    <Block position={[-1.25, 0, 0]} size={[1.4, .12, .58]} color="#9b6a41" />
+    {[-1.85, -.7].flatMap((pierX) => [-.3, .3].map((pierZ) => <Block key={`${pierX}:${pierZ}`} position={[pierX, -.1, pierZ]} size={[.08, .52, .08]} color="#5d4029" />))}
+    <Block position={[-1.9, .55, -.3]} size={[.045, 1.05, .045]} color="#5d4029" />
+    <mesh position={[-1.9, 1.02, -.3]}><sphereGeometry args={[.09, 7, 6]} /><meshStandardMaterial color="#ffd06d" emissive="#ff9a38" emissiveIntensity={1.8} /></mesh>
+  </group>
+}
+
+function PathNetwork({ profile }: { profile: ShipProfile }) {
+  const paths = useMemo(() => {
+    const groups = new Map<number, Building[]>()
+    for (const building of profile.progression.buildings) {
+      let closest = 0
+      let closestDistance = Infinity
+      profile.island.landmasses.forEach((land, index) => {
+        const distance = (building.position[0] - land.x) ** 2 + (building.position[2] - land.z) ** 2
+        if (distance < closestDistance) { closestDistance = distance; closest = index }
+      })
+      groups.set(closest, [...(groups.get(closest) ?? []), building])
+    }
+    return [...groups.values()].flatMap((buildings) => buildings.slice(1).map((building) => [buildings[0], building] as const))
+  }, [profile])
+  const score = profile.progression.score
+  const surface = score >= 70 ? '#8d9492' : score >= 38 ? '#9c9278' : '#aa855d'
+  const width = score >= 70 ? .28 : score >= 38 ? .22 : .16
+  return <group>
+    {paths.map(([from, to]) => {
+      const dx = to.position[0] - from.position[0]
+      const dz = to.position[2] - from.position[2]
+      const length = Math.hypot(dx, dz)
+      if (length < .1) return null
+      return <mesh key={`${from.id}:${to.id}`} position={[(from.position[0] + to.position[0]) / 2, Math.min(from.position[1], to.position[1]) - .08, (from.position[2] + to.position[2]) / 2]} rotation={[0, -Math.atan2(dz, dx), 0]} receiveShadow>
+        <boxGeometry args={[length, .035, width]} />
+        <meshStandardMaterial color={surface} roughness={.96} />
+      </mesh>
+    })}
+  </group>
+}
+
+export function HomeIsland({ profile, onClick, onRepositoryClick, onBuildingClick, isNight = false, ambient = true, shadows = true }: {
   profile: ShipProfile; onClick?: () => void
   onRepositoryClick?: (repository: RepositoryIsland) => void
   onBuildingClick: (building: Building) => void
   isNight?: boolean
+  ambient?: boolean
+  shadows?: boolean
 }) {
   const { landmasses, level } = profile.island
   const seed = hash(profile.user.login)
@@ -191,12 +249,21 @@ export function HomeIsland({ profile, onClick, onRepositoryClick, onBuildingClic
   const harbor = profile.progression.buildings.find((building) => building.id === 'harbor')
   const mainLand = landmasses[0]
   const mountainCount = Math.min(3, Math.floor(level / 3))
-  return <group position={profile.homePosition} onClick={(event) => { event.stopPropagation(); onClick?.() }}>
+  const islandRef = useRef<THREE.Group>(null)
+  useLayoutEffect(() => {
+    islandRef.current?.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return
+      object.castShadow = shadows
+      object.receiveShadow = shadows
+    })
+  }, [shadows])
+  return <group ref={islandRef} position={profile.homePosition} onClick={(event) => { event.stopPropagation(); onClick?.() }}>
     {landmasses.map((land, index) => <LandmassTerrain key={index} land={land} palette={(seed + index) % 3 === 0 ? '#80af71' : palette} seed={seed} index={index} />)}
     {Array.from({ length: mountainCount }, (_, index) => <Mountain key={index} land={landmasses[(seed + index * 2) % landmasses.length]} index={index} />)}
     {level >= 5 && <CentralManor land={mainLand} color={profile.languages[0]?.color ?? '#875337'} />}
-    <PortResidents land={mainLand} count={Math.min(6, 2 + Math.floor(level / 2))} seed={seed} />
-    <MerchantBoat land={mainLand} seed={seed} />
+    {ambient && <PortResidents land={mainLand} count={Math.min(6, 2 + Math.floor(level / 2))} seed={seed} />}
+    {ambient && <MerchantBoat land={mainLand} seed={seed} />}
+    <PathNetwork profile={profile} />
     {profile.progression.buildings.map((building) => {
       const repository = profile.repositories.find((repo) => repo.html_url === building.repositoryUrl)
       return <InteractiveBuilding key={building.id} building={building} repository={repository}
@@ -207,6 +274,7 @@ export function HomeIsland({ profile, onClick, onRepositoryClick, onBuildingClic
       <Block position={[0, 0, 0]} size={[.95, .12, .65]} color="#997044" />
       {[-.26, .26].map((z) => <Block key={z} position={[.4, .03, z]} size={[.09, .5, .09]} color="#62492f" />)}
     </group>}
-    {isNight && <NightPortLights buildings={profile.progression.buildings} />}
+    <DockingPier profile={profile} />
+    {isNight && ambient && <NightPortLights buildings={profile.progression.buildings} />}
   </group>
 }

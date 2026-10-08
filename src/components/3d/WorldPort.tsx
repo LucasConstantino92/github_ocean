@@ -1,6 +1,3 @@
-import { useRef, useState } from 'react'
-import { useFrame } from '@react-three/fiber'
-import * as THREE from 'three'
 import type { Building, RepositoryIsland, ShipProfile } from '../../types/ocean'
 import { HomeIsland } from './Island'
 import { Ship } from './Ship'
@@ -27,50 +24,16 @@ export function WorldPort({
   onDeveloperClick,
   onRepositoryClick,
   onBuildingClick,
-  isNight,
   discovered,
+  renderMode,
 }: {
   developer: ShipProfile
   onDeveloperClick: (developer: ShipProfile) => void
   onRepositoryClick: (repository: RepositoryIsland) => void
   onBuildingClick: (building: Building) => void
-  isNight: boolean
   discovered: boolean
+  renderMode: 'proxy' | 'detailed'
 }) {
-  const visibility = useRef({ visible: false, detailed: false, lastCheck: 0 })
-  const [renderMode, setRenderMode] = useState<'hidden' | 'proxy' | 'detailed'>('hidden')
-  const world = useRef(new THREE.Vector3(...developer.homePosition))
-  const bounds = useRef(new THREE.Sphere())
-  const frustum = useRef(new THREE.Frustum())
-  const projection = useRef(new THREE.Matrix4())
-
-  useFrame(({ camera, clock }) => {
-    // Checking a port four times per second is enough for fluid movement and
-    // avoids keeping full islands alive outside the camera's real V-shaped view.
-    if (clock.elapsedTime - visibility.current.lastCheck < .12) return
-    visibility.current.lastCheck = clock.elapsedTime
-    world.current.set(...developer.homePosition)
-    bounds.current.center.copy(world.current)
-    bounds.current.radius = developer.progression.island.radius + 4
-    projection.current.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
-    frustum.current.setFromProjectionMatrix(projection.current)
-    const distance = camera.position.distanceTo(world.current)
-    const visible = distance < 170 && frustum.current.intersectsSphere(bounds.current)
-    // Full buildings and ambient life are kept close to the player; farther
-    // ports retain a recognizable low-detail silhouette.
-    const detailed = visible && distance < 56
-    const nextMode = !visible ? 'hidden' : detailed ? 'detailed' : 'proxy'
-    const currentMode = visibility.current.visible
-      ? visibility.current.detailed ? 'detailed' : 'proxy'
-      : 'hidden'
-    if (nextMode === currentMode) return
-    visibility.current.visible = visible
-    visibility.current.detailed = detailed
-    setRenderMode(nextMode)
-  })
-
-  if (renderMode === 'hidden') return null
-
   if (!discovered) return <FogBank position={developer.homePosition} />
 
   if (renderMode === 'detailed') {
@@ -81,9 +44,11 @@ export function WorldPort({
           onClick={() => onDeveloperClick(developer)}
           onRepositoryClick={onRepositoryClick}
           onBuildingClick={onBuildingClick}
-          isNight={isNight}
+          isNight={false}
+          ambient={false}
+          shadows={false}
         />
-        <Ship profile={developer} onClick={() => onDeveloperClick(developer)} />
+        <Ship profile={developer} onClick={() => onDeveloperClick(developer)} animate={false} />
       </group>
     )
   }

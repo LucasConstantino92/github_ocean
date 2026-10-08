@@ -11,18 +11,31 @@ type OAuthState = { nonce: string; exp: number }
 type EventType = 'app_opened' | 'developer_searched' | 'developer_loaded' | 'repository_opened' | 'login_started' | 'login_succeeded'
 const app = express(), prisma = new PrismaClient(), world = createWorldService(prisma)
 const eventTypes = new Set<EventType>(['app_opened', 'developer_searched', 'developer_loaded', 'repository_opened', 'login_started', 'login_succeeded'])
+let analyticsUnavailable = false
 const sessionFor = (header: string | undefined) => verifyToken<Session>(readCookie(header, 'github_ocean_session'))
 const metadata = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
   ? Object.fromEntries(Object.entries(value).slice(0, 8).filter(([, item]) => ['string', 'number', 'boolean'].includes(typeof item)).map(([key, item]) => [key.slice(0, 40), typeof item === 'string' ? item.slice(0, 160) : item])) as Record<string, string | number | boolean> : undefined
 async function event(type: EventType, data: { anonymousId?: string; githubLogin?: string; path?: string; metadata?: Record<string, string | number | boolean> } = {}) {
-  try { await prisma.analyticsEvent.create({ data: { type, anonymousId: data.anonymousId, githubLogin: data.githubLogin?.toLowerCase(), path: data.path, metadata: data.metadata } }) }
-  catch (error) { console.warn(`Analytics indisponível para ${type}.`, error) }
+  try {
+    await prisma.analyticsEvent.create({ data: { type, anonymousId: data.anonymousId, githubLogin: data.githubLogin?.toLowerCase(), path: data.path, metadata: data.metadata } })
+    analyticsUnavailable = false
+  } catch (error) {
+    if (!analyticsUnavailable) console.warn(`Analytics indisponível; os eventos serão ignorados até o banco voltar. (${error instanceof Error ? error.message : String(error)})`)
+    analyticsUnavailable = true
+  }
 }
 
 app.set('trust proxy', 1)
 app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173', credentials: true }))
 app.use(express.json({ limit: '16kb' }))
-app.get('/api/health', (_request, response) => response.json({ ok: true }))
+app.get('/api/health', async (_request, response) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    response.json({ ok: true, database: 'connected' })
+  } catch {
+    response.status(503).json({ ok: false, database: 'unavailable' })
+  }
+})
 
 app.post('/api/analytics/events', async (request, response) => {
   const { type, anonymousId, path, metadata: rawMetadata } = request.body as { type?: string; anonymousId?: string; path?: string; metadata?: unknown }

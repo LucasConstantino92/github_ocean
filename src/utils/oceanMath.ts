@@ -21,7 +21,7 @@ export const shipWaterlineOffset = 0.14
 
 export const playerSailingMetrics = {
   speed: 0,
-  maxSpeed: 7.2,
+  maxSpeed: 4.8,
   heading: 0,
   pitch: 0,
   roll: 0,

@@ -6,16 +6,27 @@ import type { PlayerTransform } from '../../types/ocean'
 export function PlayerCamera({
   transformRef,
   recenterRef,
+  initialDistance = 13,
+  minDistance = 7,
+  maxDistance = 34,
+  targetHeight = 1.15,
+  onOrbitHeading,
 }: {
   transformRef: React.MutableRefObject<PlayerTransform>
   recenterRef: React.MutableRefObject<boolean>
+  initialDistance?: number
+  minDistance?: number
+  maxDistance?: number
+  targetHeight?: number
+  onOrbitHeading?: (heading: number | null) => void
 }) {
   const { camera, gl } = useThree()
   const initialized = useRef(false)
   const dragging = useRef(false)
   const yawOffset = useRef(0)
+  const manualOrbitYaw = useRef<number | null>(null)
   const pitch = useRef(0.42)
-  const cameraDistance = useRef(13)
+  const cameraDistance = useRef(initialDistance)
   const desiredPosition = useRef(new THREE.Vector3())
   const target = useRef(new THREE.Vector3())
 
@@ -26,29 +37,34 @@ export function PlayerCamera({
       event.preventDefault()
       dragging.current = true
       const [x, y, z] = transformRef.current.position
-      target.current.set(x, y + 1.15, z)
+      target.current.set(x, y + targetHeight, z)
       const offset = camera.position.clone().sub(target.current)
       const distance = Math.max(offset.length(), 0.01)
-      cameraDistance.current = THREE.MathUtils.clamp(distance, 7, 34)
-      // Preserve the player's manual orbit as an offset from the ship's bow.
-      // The camera can therefore keep following a turn instead of becoming detached.
-      yawOffset.current = THREE.MathUtils.euclideanModulo(
-        Math.atan2(offset.x, offset.z) - (transformRef.current.rotation - Math.PI / 2) + Math.PI,
-        Math.PI * 2
-      ) - Math.PI
+      cameraDistance.current = THREE.MathUtils.clamp(distance, minDistance, maxDistance)
+      // While dragging, keep an absolute world angle. Deriving this from the
+      // vessel each frame feeds its own rotation back into the target heading,
+      // which is what previously made a held right-click spin forever.
+      manualOrbitYaw.current = Math.atan2(offset.x, offset.z)
       pitch.current = Math.asin(THREE.MathUtils.clamp(offset.y / distance, -1, 1))
     }
     const onPointerMove = (event: MouseEvent) => {
       if (!dragging.current) return
-      yawOffset.current -= event.movementX * 0.006
+      if (manualOrbitYaw.current !== null) manualOrbitYaw.current -= event.movementX * 0.006
       pitch.current = THREE.MathUtils.clamp(pitch.current - event.movementY * 0.005, 0.08, 1.08)
     }
     const onPointerUp = () => {
+      const manualYaw = manualOrbitYaw.current
+      if (manualYaw !== null) {
+        const baseYaw = transformRef.current.rotation - Math.PI / 2
+        yawOffset.current = Math.atan2(Math.sin(manualYaw - baseYaw), Math.cos(manualYaw - baseYaw))
+      }
+      manualOrbitYaw.current = null
       dragging.current = false
+      onOrbitHeading?.(null)
     }
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      cameraDistance.current = THREE.MathUtils.clamp(cameraDistance.current + event.deltaY * 0.018, 7, 34)
+      cameraDistance.current = THREE.MathUtils.clamp(cameraDistance.current + event.deltaY * 0.018, minDistance, maxDistance)
     }
     const disableMenu = (event: MouseEvent) => event.preventDefault()
 
@@ -65,17 +81,18 @@ export function PlayerCamera({
       window.removeEventListener('mouseup', onPointerUp)
       element.removeEventListener('wheel', onWheel)
     }
-  }, [camera, gl, transformRef])
+  }, [camera, gl, maxDistance, minDistance, onOrbitHeading, targetHeight, transformRef])
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.1)
     const transform = transformRef.current
     const [x, y, z] = transform.position
     const distance = cameraDistance.current
-    target.current.set(x, y + 1.15, z)
+    target.current.set(x, y + targetHeight, z)
 
     if (recenterRef.current) {
       yawOffset.current = 0
+      manualOrbitYaw.current = null
       recenterRef.current = false
     }
     // When the right mouse button is released, the orbit gently returns behind
@@ -84,7 +101,8 @@ export function PlayerCamera({
       yawOffset.current = THREE.MathUtils.damp(yawOffset.current, 0, 2.4, dt)
       pitch.current = THREE.MathUtils.damp(pitch.current, 0.42, 2.4, dt)
     }
-    const orbitYaw = transform.rotation - Math.PI / 2 + yawOffset.current
+    const orbitYaw = manualOrbitYaw.current ?? (transform.rotation - Math.PI / 2 + yawOffset.current)
+    if (dragging.current) onOrbitHeading?.(orbitYaw + Math.PI / 2)
     const orbitPitch = pitch.current
     const horizontalDistance = Math.cos(orbitPitch) * distance
     desiredPosition.current.set(

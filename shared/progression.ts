@@ -68,7 +68,9 @@ export function calculateProgression(user: ProgressUser, repositories: ProgressR
   const crewThresholds = [10, 50, 150, 400, 1000, 2500, 6000]
   const crew = 1 + levelAt(commits, crewThresholds)
   const ship = {
-    size: .7 + score * .0075, masts, sails: masts + extraSails, crew,
+    // Boats stay below the scale of a walkable building. Crew members use a
+    // fixed world scale in the renderer, matching the future playable captain.
+    size: .5 + score * .004, masts, sails: masts + extraSails, crew,
     nextCrew: crewThresholds.find((n) => n > commits) ?? null,
     hullLength: 1.6 + masts * .3 + axes.projects * .003,
     hullWidth: .65 + axes.community * .003,

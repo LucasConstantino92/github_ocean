@@ -13,7 +13,7 @@ export function SkyStars({ visible = true }: { visible?: boolean }) {
   if (!visible) return null
   return (
     <group ref={sky}>
-      <Stars radius={68} depth={32} count={1800} factor={3} saturation={0} fade speed={0.3} />
+      <Stars radius={68} depth={32} count={1000} factor={3} saturation={0} fade speed={0.3} />
     </group>
   )
 }

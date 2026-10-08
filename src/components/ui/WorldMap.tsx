@@ -1,4 +1,5 @@
 import type { ShipProfile } from '../../types/ocean'
+import { DirectionMarker } from './DirectionMarker'
 
 const mapRange = 420
 
@@ -7,6 +8,7 @@ export function WorldMap({
   profile,
   developers,
   playerPosition,
+  heading,
   discoveredPorts,
   waypoint,
   onWaypointChange,
@@ -16,6 +18,7 @@ export function WorldMap({
   profile: ShipProfile | null
   developers: ShipProfile[]
   playerPosition: [number, number, number]
+  heading: number
   discoveredPorts: ReadonlySet<string>
   waypoint: [number, number, number] | null
   onWaypointChange: (point: [number, number, number]) => void
@@ -26,8 +29,11 @@ export function WorldMap({
   const coordinate = (value: number, center: number) => 50 + (value - center) / mapRange * 100
   const setWaypoint = (event: React.PointerEvent<HTMLDivElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect()
-    const x = playerPosition[0] + (event.clientX - bounds.left) / bounds.width * mapRange - mapRange / 2
-    const z = playerPosition[2] + (event.clientY - bounds.top) / bounds.height * mapRange - mapRange / 2
+    const screenX = (event.clientX - bounds.left) / bounds.width * mapRange - mapRange / 2
+    const screenZ = (event.clientY - bounds.top) / bounds.height * mapRange - mapRange / 2
+    const rotation = heading - Math.PI / 2
+    const x = playerPosition[0] + screenX * Math.cos(rotation) + screenZ * Math.sin(rotation)
+    const z = playerPosition[2] - screenX * Math.sin(rotation) + screenZ * Math.cos(rotation)
     onWaypointChange([x, 0, z])
   }
 
@@ -36,6 +42,7 @@ export function WorldMap({
       <header><div><span className="eyebrow">CARTA NÁUTICA</span><h2>Ocean Atlas</h2></div><button onClick={onClose}>Fechar <kbd>M</kbd></button></header>
       <div className="world-map" onPointerDown={setWaypoint}>
         <span className="map-grid map-grid-x" /><span className="map-grid map-grid-z" />
+        <div className="world-map-content" style={{ transform: `rotate(${heading * 180 / Math.PI - 90}deg)` }}>
         {ports.map((port) => {
           const left = coordinate(port.homePosition[0], playerPosition[0])
           const top = coordinate(port.homePosition[2], playerPosition[2])
@@ -51,7 +58,8 @@ export function WorldMap({
           >{discovered ? '◆' : '·'}</button>
         })}
         {waypoint && <span className="world-map-waypoint" style={{ left: `${coordinate(waypoint[0], playerPosition[0])}%`, top: `${coordinate(waypoint[2], playerPosition[2])}%` }}>✦</span>}
-        <span className="world-map-player">▲</span>
+        </div>
+        <DirectionMarker className="world-map-player" />
       </div>
       <footer>Clique no oceano para marcar um rumo. Clique em um porto para usar sua posição como destino.</footer>
     </div>
@@ -73,9 +81,11 @@ export function WaypointCompass({ waypoint, playerPosition, heading, onClear }: 
   const targetZ = dz / length
   const forwardX = Math.cos(heading)
   const forwardZ = -Math.sin(heading)
-  const angle = Math.atan2(forwardZ * targetX - forwardX * targetZ, forwardX * targetX + forwardZ * targetZ) * 180 / Math.PI
+  const rightX = Math.sin(heading)
+  const rightZ = Math.cos(heading)
+  const angle = Math.atan2(targetX * rightX + targetZ * rightZ, targetX * forwardX + targetZ * forwardZ) * 180 / Math.PI
   return <aside className="waypoint-compass" aria-label={`Destino a ${distance} unidades`}>
-    <span className="waypoint-arrow" style={{ transform: `rotate(${angle}deg)` }}>▲</span>
+    <DirectionMarker className="waypoint-arrow" angle={angle} />
     <span><b>{distance} u</b><small>DESTINO MARCADO</small></span>
     <button onClick={onClear} aria-label="Remover destino">×</button>
   </aside>

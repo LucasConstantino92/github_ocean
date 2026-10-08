@@ -5,12 +5,14 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import * as THREE from 'three'
 import type { Building, RepositoryIsland, ShipProfile, WorldChunk } from '../../types/ocean'
 import { OceanSurface } from './OceanSurface'
-import { WorldPort } from './WorldPort'
+import { PortLayer } from './PortLayer'
 import { HomeIsland } from './Island'
 import { Ship } from './Ship'
 import { PlayerNavigator } from './PlayerNavigator'
+import { CaptainNavigator } from './CaptainNavigator'
 import { SkyStars, CameraTravel } from './SkyStars'
 import { WeatherSystem } from './WeatherSystem'
+import { PerformanceHud } from './PerformanceHud'
 import { localWeather, type LocalWeather } from '../../utils/weather'
 
 export type CameraView = {
@@ -56,6 +58,7 @@ export const OceanScene = memo(function OceanScene({
   focusProfile,
   canSail,
   returnHome,
+  playerMode,
   onDeveloperClick,
   onRepositoryClick,
   onBuildingClick,
@@ -64,6 +67,8 @@ export const OceanScene = memo(function OceanScene({
   onViewChange,
   onDiscoverPort,
   onHeadingChange,
+  onDisembark,
+  onBoard,
   discoveredPorts,
 }: {
   profile: ShipProfile | null
@@ -71,6 +76,7 @@ export const OceanScene = memo(function OceanScene({
   focusProfile: ShipProfile | null
   canSail: boolean
   returnHome: number
+  playerMode: 'sail' | 'shore'
   onDeveloperClick: (developer: ShipProfile) => void
   onRepositoryClick: (repository: RepositoryIsland) => void
   onBuildingClick: (building: Building) => void
@@ -79,37 +85,34 @@ export const OceanScene = memo(function OceanScene({
   onViewChange: (view: CameraView) => void
   onDiscoverPort: (login: string) => void
   onHeadingChange: (heading: number) => void
+  onDisembark: () => void
+  onBoard: () => void
   discoveredPorts: ReadonlySet<string>
 }) {
   const controls = useRef<OrbitControlsImpl>(null)
   const weather = useLocalWeather()
+  const showPerformance = new URLSearchParams(window.location.search).has('perf')
 
   return (
     <Canvas
       shadows="basic"
-      dpr={[1, 1.25]}
+      dpr={[1, 1.15]}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
       camera={{ position: [0, 18, 28], fov: 45, near: .1, far: 210 }}
     >
       <WeatherSystem weather={weather} />
       <OceanSurface />
-      {worldProfiles
-        .filter((developer) => developer.user.login.toLowerCase() !== profile?.user.login.toLowerCase())
-        .map((developer) => (
-          <WorldPort
-            key={developer.user.login}
-            developer={developer}
-            onDeveloperClick={onDeveloperClick}
-            onRepositoryClick={onRepositoryClick}
-            onBuildingClick={onBuildingClick}
-            isNight={weather.phase === 'night'}
-            discovered={discoveredPorts.has(developer.user.login.toLowerCase())}
-          />
-        ))}
+      <PortLayer
+        developers={worldProfiles.filter((developer) => developer.user.login.toLowerCase() !== profile?.user.login.toLowerCase())}
+        onDeveloperClick={onDeveloperClick}
+        onRepositoryClick={onRepositoryClick}
+        onBuildingClick={onBuildingClick}
+        discoveredPorts={discoveredPorts}
+      />
       {profile && (
         <>
           <HomeIsland profile={profile} onRepositoryClick={onRepositoryClick} onBuildingClick={onBuildingClick} isNight={weather.phase === 'night'} />
-          {canSail ? (
+          {canSail && playerMode === 'sail' ? (
             <PlayerNavigator
               profile={profile}
               collisionProfiles={worldProfiles}
@@ -118,7 +121,13 @@ export const OceanScene = memo(function OceanScene({
               onPositionChange={onPositionChange}
               onDiscoverPort={(login) => onDiscoverPort(login)}
               onHeadingChange={onHeadingChange}
+              onDisembark={onDisembark}
             />
+          ) : canSail ? (
+            <>
+              <Ship profile={profile} />
+              <CaptainNavigator profile={profile} onPositionChange={onPositionChange} onHeadingChange={onHeadingChange} onBoard={onBoard} />
+            </>
           ) : (
             <Ship profile={profile} />
           )}
@@ -127,6 +136,7 @@ export const OceanScene = memo(function OceanScene({
       {!canSail && <CameraTravel destination={focusProfile?.homePosition ?? profile?.homePosition ?? null} controls={controls} />}
       <SkyStars visible={weather.phase === 'night'} />
       <CameraViewReporter onViewChange={onViewChange} />
+      {showPerformance && <PerformanceHud loadedPorts={worldProfiles.length} />}
       {!canSail && (
         <OrbitControls
           ref={controls}

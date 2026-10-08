@@ -47,6 +47,7 @@ export function App() {
   const [mapOpen, setMapOpen] = useState(false)
   const [waypoint, setWaypoint] = useState<[number, number, number] | null>(null)
   const [playerHeading, setPlayerHeading] = useState(-.35)
+  const [playerMode, setPlayerMode] = useState<'sail' | 'shore'>('sail')
 
   useOceanAmbience(soundEnabled)
 
@@ -67,6 +68,26 @@ export function App() {
       saveDiscoveredPorts(next)
       return next
     })
+  }, [])
+
+  const updateCachedDeveloper = useCallback((developer: { user: GitHubUser; repositories: GitHubRepository[]; world_position?: [number, number] }) => {
+    const login = developer.user.login.toLowerCase()
+    let replaced = false
+    for (const [key, entries] of worldChunkCache.current) {
+      let changed = false
+      const next = entries.map((entry) => {
+        if (entry.user.login.toLowerCase() !== login) return entry
+        replaced = true
+        changed = true
+        return developer
+      })
+      if (changed) worldChunkCache.current.set(key, next)
+    }
+    if (!replaced && developer.world_position) {
+      const [chunkX, chunkZ] = worldChunkFor([developer.world_position[0], 0, developer.world_position[1]])
+      const key = `${chunkX}:${chunkZ}`
+      worldChunkCache.current.set(key, [...(worldChunkCache.current.get(key) ?? []), developer])
+    }
   }, [])
 
   const changeLocale = (next: Locale) => {
@@ -96,6 +117,7 @@ export function App() {
         if (asCaptain || !githubLogin) {
           setProfile(nextProfile)
           setPlayerPosition(nextProfile.position)
+          setPlayerMode('sail')
           setSelectedDeveloper(null)
           setFocusedDeveloper(null)
         } else {
@@ -199,13 +221,13 @@ export function App() {
           if (oldest === undefined) break
           worldChunkCache.current.delete(oldest)
         }
+        // Retain already loaded ports while the camera turns. Rendering is
+        // handled by the 3D LOD layer; throwing these profiles away here was
+        // the source of the hard pop at chunk-sector boundaries.
         const developers = new Map<string, ShipProfile>()
-        for (const [x, z] of regions) {
-          for (const developer of worldChunkCache.current.get(`${x}:${z}`) ?? []) {
-            developers.set(
-              developer.user.login,
-              createProfile(developer.user, developer.repositories, developer.world_position)
-            )
+        for (const entries of worldChunkCache.current.values()) {
+          for (const developer of entries) {
+            developers.set(developer.user.login, createProfile(developer.user, developer.repositories, developer.world_position))
           }
         }
         setWorldProfiles([...developers.values()])
@@ -255,12 +277,13 @@ export function App() {
         .then((data) => {
           const updated = createProfile(data.user, data.repositories, data.world_position)
           const login = updated.user.login.toLowerCase()
+          updateCachedDeveloper(data)
           setSelectedDeveloper((current) => current?.user.login.toLowerCase() === login ? updated : current)
           setWorldProfiles((current) => current.map((item) => item.user.login.toLowerCase() === login ? updated : item))
         })
         .catch(() => setStatus('Este porto ainda precisa ser atualizado. Tente pesquisar o usuário novamente.'))
     }
-  }, [])
+  }, [updateCachedDeveloper])
 
   const visitRepository = useCallback((repository: RepositoryIsland) => {
     trackEvent('repository_opened', { repository: repository.name })
@@ -284,9 +307,16 @@ export function App() {
     setFocusedDeveloper(null)
     setSelectedRepository(null)
     setSelectedBuilding(null)
+    setPlayerMode('sail')
     if (profile) setWorldChunk(worldChunkFor(profile.homePosition))
     setReturnHome((value) => value + 1)
   }, [profile])
+
+  const disembark = useCallback(() => setPlayerMode('shore'), [])
+  const board = useCallback(() => {
+    setPlayerMode('sail')
+    setReturnHome((value) => value + 1)
+  }, [])
 
   return (
     <main className="app-shell">
@@ -297,6 +327,7 @@ export function App() {
           focusProfile={focusedDeveloper}
           canSail={canSail}
           returnHome={returnHome}
+          playerMode={playerMode}
           onDeveloperClick={visitDeveloper}
           onRepositoryClick={visitRepository}
           onBuildingClick={visitBuilding}
@@ -306,6 +337,8 @@ export function App() {
           onDiscoverPort={discoverPort}
           discoveredPorts={discoveredPorts}
           onHeadingChange={updatePlayerHeading}
+          onDisembark={disembark}
+          onBoard={board}
         />
       </div>
 
@@ -341,6 +374,7 @@ export function App() {
           developers={visibleWorldProfiles}
           playerPosition={focusedDeveloper?.homePosition ?? (canSail ? playerPosition : profile.position)}
           discoveredPorts={discoveredPorts}
+          heading={playerHeading}
         />
       )}
 
@@ -350,6 +384,7 @@ export function App() {
         profile={profile}
         developers={visibleWorldProfiles}
         playerPosition={playerPosition}
+        heading={playerHeading}
         discoveredPorts={discoveredPorts}
         waypoint={waypoint}
         onWaypointChange={(point) => { setWaypoint(point); setMapOpen(false) }}
@@ -357,7 +392,7 @@ export function App() {
       />
 
       <footer>
-        <span>{canSail ? t.controls : 'Arraste para olhar · Scroll para zoom'}</span>
+        <span>{canSail ? playerMode === 'sail' ? `${t.controls} · A marca dourada indica o cais · E para desembarcar` : 'WASD ou setas para caminhar · E perto do barco para embarcar' : 'Arraste para olhar · Scroll para zoom'}</span>
         <span>{t.world}</span>
       </footer>
     </main>

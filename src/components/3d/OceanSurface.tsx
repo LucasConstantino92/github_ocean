@@ -48,7 +48,7 @@ export function OceanSurface() {
   })
   return (
     <mesh ref={surface} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <planeGeometry args={[650, 650, 128, 128]} />
+      <planeGeometry args={[650, 650, 96, 96]} />
       <shaderMaterial
         ref={material}
         vertexShader={oceanVertexShader}

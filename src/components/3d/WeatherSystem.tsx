@@ -14,7 +14,7 @@ const palette: Record<DayPhase, { background: string; fog: string; light: string
 function Rain({ active, storm }: { active: boolean; storm: boolean }) {
   const points = useRef<THREE.Points>(null)
   const geometry = useMemo(() => {
-    const drops = new Float32Array(300 * 3)
+    const drops = new Float32Array(180 * 3)
     for (let index = 0; index < drops.length; index += 3) {
       drops[index] = ((index * 37) % 190) / 10 - 9.5
       drops[index + 1] = ((index * 71) % 190) / 10
@@ -57,7 +57,7 @@ export function WeatherSystem({ weather }: { weather: LocalWeather }) {
     <color attach="background" args={[background]} />
     <fog attach="fog" args={[fogColor, fogNear, fogFar]} />
     <ambientLight intensity={base.ambient * weatherDarkness} />
-    <directionalLight position={[-8, 12, 4]} color={base.light} intensity={base.sun * weatherDarkness} castShadow />
+    <directionalLight position={[-8, 12, 4]} color={base.light} intensity={base.sun * weatherDarkness} castShadow shadow-mapSize-width={512} shadow-mapSize-height={512} />
     <Rain active={weather.kind === 'rain' || weather.kind === 'storm'} storm={weather.kind === 'storm'} />
   </>
 }

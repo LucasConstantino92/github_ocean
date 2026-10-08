@@ -138,10 +138,17 @@ Click a repository building to open its details and its GitHub URL. Click a shar
 | Right mouse drag | Orbit camera around the player's ship |
 | Mouse wheel | Zoom |
 | `M` | Open or close the full nautical map |
+| `E` near your moored ship | Disembark or board |
 | Search | Travel to a developer's port |
 | Go to my port | Return to the signed-in captain and re-enable sailing |
 
 The full map can mark a free waypoint or a port. A compass and distance indicator guide manual sailing; it never steers the ship automatically.
+
+### Walkable-port foundation
+
+Ships are scaled below the size of a walkable building, while crew members share the fixed world scale of the playable captain and port residents. When the captain is signed in, slow down beside the moored ship at the home port and press `E` to disembark. Movement on land is limited to the solid landmasses of the archipelago; approach the ship and press `E` to board again.
+
+This establishes a compatible scale and control loop for future interiors, public manor galleries, and persistent trophy displays.
 
 ## Local weather and light
 
