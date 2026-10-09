@@ -267,6 +267,12 @@ export function App() {
     setSelectedRepository(null)
     setSelectedBuilding(null)
     setSelectedDeveloper(developer)
+    void fetch(apiUrl(`/api/developers/${encodeURIComponent(developer.user.login)}/connections`), { method: 'POST' })
+      .then(async (response) => response.ok ? response.json() as Promise<{ added: number }> : { added: 0 })
+      .then(({ added }) => {
+        if (added) setStatus(`${added} novos portos foram descobertos nas conexões públicas de ${developer.user.login}.`)
+      })
+      .catch(() => undefined)
     if (developer.user.profile_complete === false) {
       // Hydrate discovered/legacy ports without entering search/visit camera mode.
       void fetch(apiUrl(`/api/developers/${encodeURIComponent(developer.user.login)}`))

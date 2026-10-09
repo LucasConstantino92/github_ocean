@@ -219,6 +219,18 @@ as the Authorization callback URL in the GitHub OAuth App.
 
 The server stores developers, repositories, ports, analytics events, and indexer state in PostgreSQL. A developer's port coordinate is allocated once and remains stable after later profile updates.
 
+The first public-world population is deliberate rather than dependent on the first visitor. Run this once from a machine configured with the production database URL and a GitHub API token:
+
+```bash
+npm run world:seed
+```
+
+It imports 36 public, active GitHub profiles with public repositories and at least 100 followers. Pass a number from 1 to 60 to choose a different initial size, for example `npm run world:seed -- 48`.
+
+Afterwards, the Vercel daily cron calls `/api/cron/index-world`. It indexes five further qualifying public profiles per run and rotates through the GitHub search pages. A GitHub login or a manual profile search always synchronizes that person's port immediately; neither waits for the cron.
+
+Selecting a captain's ship also expands the map organically: up to twelve public followers and twelve public accounts that the captain follows are reserved as lightweight explorer ports. These ports are enriched into complete islands only when a visitor selects or searches for them. A short server-side cooldown prevents repeat clicks from repeatedly querying the same public connection graph.
+
 The optional continuous local indexer can be run with:
 
 ```bash

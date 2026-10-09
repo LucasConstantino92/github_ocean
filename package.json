@@ -15,6 +15,7 @@
     "db:generate": "prisma generate",
     "worker:discover": "tsx server/workers/discover.ts",
     "world:index": "tsx server/workers/continuous-indexer.ts",
+    "world:seed": "tsx server/workers/bootstrap-world.ts",
     "world:relayout": "tsx server/workers/relayout.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",

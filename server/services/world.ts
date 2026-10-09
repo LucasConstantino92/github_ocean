@@ -15,6 +15,7 @@ const positionHash = (value: string, salt = 0) => [...value].reduce((result, cha
 
 export function createWorldService(prisma: PrismaClient) {
   const cache = new Map<string, CachedDeveloper>()
+  const connectionDiscovery = new Map<string, number>()
   const githubHeaders: Record<string, string> = { Accept: 'application/vnd.github+json', 'User-Agent': 'github-ocean', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) }
 
   const fallbackPosition = (login: string): WorldPosition => {
@@ -75,17 +76,34 @@ export function createWorldService(prisma: PrismaClient) {
     return response
   }
 
-  const discoverNeighbors = async (username: string) => {
+  const discoverConnections = async (username: string) => {
+    const normalizedUsername = username.toLowerCase()
+    const nextAllowedAt = connectionDiscovery.get(normalizedUsername) ?? 0
+    if (nextAllowedAt > Date.now()) return 0
+    connectionDiscovery.set(normalizedUsername, Date.now() + cacheTtlMs)
     try {
-      const neighbors = await (await github(`/users/${encodeURIComponent(username)}/followers?per_page=12`)).json() as GitHubNeighbor[]
-      for (const neighbor of neighbors) {
+      const [followers, following] = await Promise.all([
+        (await github(`/users/${encodeURIComponent(username)}/followers?per_page=12`)).json() as Promise<GitHubNeighbor[]>,
+        (await github(`/users/${encodeURIComponent(username)}/following?per_page=12`)).json() as Promise<GitHubNeighbor[]>,
+      ])
+      const connections = new Map<string, GitHubNeighbor>()
+      for (const neighbor of [...followers, ...following]) connections.set(neighbor.login.toLowerCase(), neighbor)
+      let created = 0
+      for (const neighbor of connections.values()) {
         const login = neighbor.login.toLowerCase()
         if (await prisma.developer.findUnique({ where: { githubLogin: login } })) continue
-        const position = await availablePosition(login)
-        const developer = await prisma.developer.create({ data: { githubLogin: login, name: neighbor.login, avatarUrl: neighbor.avatar_url, bio: 'Explorador descoberto nas conexões públicas do GitHub.', publicRepos: 0, followers: 0, languages: {} } })
-        await prisma.port.create({ data: { developerId: developer.id, worldX: position[0], worldZ: position[1], islandSize: .72, islandLevel: 1, totalCommits: 0, shipClass: 'Skiff' } })
+        try {
+          const position = await availablePosition(login)
+          const developer = await prisma.developer.create({ data: { githubLogin: login, name: neighbor.login, avatarUrl: neighbor.avatar_url, bio: 'Explorador descoberto nas conexões públicas do GitHub.', publicRepos: 0, followers: 0, languages: {} } })
+          await prisma.port.create({ data: { developerId: developer.id, worldX: position[0], worldZ: position[1], islandSize: .72, islandLevel: 1, totalCommits: 0, shipClass: 'Skiff' } })
+          created++
+        } catch { /* Another visit can discover the same public connection concurrently. */ }
       }
-    } catch { /* Optional discovery must never block a profile sync. */ }
+      return created
+    } catch {
+      connectionDiscovery.delete(normalizedUsername)
+      return 0
+    }
   }
 
   const getCommitCount = async (repository: GitHubRepository, username: string): Promise<number | null> => {
@@ -112,12 +130,12 @@ export function createWorldService(prisma: PrismaClient) {
     try {
       position = await saveDeveloper(baseValue)
       persisted = true
-      if (discover) void discoverNeighbors(user.login)
+      if (discover) void discoverConnections(user.login)
     } catch { position = fallbackPosition(user.login) }
     const value = { ...baseValue, world_position: position }
     if (persisted) cache.set(normalizedUsername, { value, expiresAt: Date.now() + cacheTtlMs })
     return value
   }
 
-  return { github, syncDeveloper, toWorldDeveloper }
+  return { github, syncDeveloper, discoverConnections, toWorldDeveloper }
 }

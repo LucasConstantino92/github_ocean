@@ -107,16 +107,26 @@ app.get('/api/developers/:username', async (request, response) => {
   try { const value = await world.syncDeveloper(username); await event('developer_loaded', { githubLogin: session?.login, path: request.path, metadata: { username } }); response.json(value) }
   catch (error) { response.status(502).json({ message: error instanceof Error ? error.message : 'Falha ao consultar o GitHub.' }) }
 })
+app.post('/api/developers/:username/connections', async (request, response) => {
+  const username = request.params.username.replace('@', '').toLowerCase()
+  if (!/^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(username)) return response.status(400).json({ message: 'Nome de usuário do GitHub inválido.' })
+  const added = await world.discoverConnections(username)
+  response.status(202).json({ added })
+})
 app.get('/api/cron/index-world', async (request, response) => {
   const secret = process.env.CRON_SECRET, authorization = request.headers.authorization
   if (!secret) return response.status(503).json({ message: 'CRON_SECRET não configurado.' })
   if (!authorization?.startsWith('Bearer ') || !sameValue(authorization.slice(7), secret)) return response.status(401).json({ message: 'Não autorizado.' })
   try {
-    const state = await prisma.indexerState.upsert({ where: { key: 'github-public-users' }, create: { key: 'github-public-users' }, update: {} })
-    const users = await (await world.github(`/users?since=${state.cursor}&per_page=8`)).json() as { id: number; login: string }[]
-    const indexed: string[] = []; let cursor = state.cursor
-    for (const user of users) { try { await world.syncDeveloper(user.login, false); indexed.push(user.login); cursor = user.id; await prisma.indexerState.update({ where: { key: 'github-public-users' }, data: { cursor } }) } catch (error) { console.warn(`Falha ao indexar ${user.login}.`, error); break } }
-    response.json({ indexed, cursor })
+    const state = await prisma.indexerState.upsert({ where: { key: 'github-discovery-page' }, create: { key: 'github-discovery-page', cursor: 1 }, update: {} })
+    const page = Math.max(1, state.cursor)
+    const query = encodeURIComponent('type:user followers:>=100 repos:>=5')
+    const search = await (await world.github(`/search/users?q=${query}&sort=followers&order=desc&page=${page}&per_page=5`)).json() as { items?: { login: string }[] }
+    const indexed: string[] = []
+    for (const user of search.items ?? []) { try { await world.syncDeveloper(user.login, false); indexed.push(user.login) } catch (error) { console.warn(`Falha ao indexar ${user.login}.`, error) } }
+    const nextPage = page >= 100 || !(search.items?.length) ? 1 : page + 1
+    await prisma.indexerState.update({ where: { key: 'github-discovery-page' }, data: { cursor: nextPage } })
+    response.json({ indexed, page, nextPage })
   } catch (error) { response.status(502).json({ message: error instanceof Error ? error.message : 'Falha no indexador.' }) }
 })
 
