@@ -63,7 +63,7 @@ app.get('/api/auth/github', async (request, response) => {
   const state = signToken<OAuthState>({ nonce: randomBytes(24).toString('hex'), exp: Date.now() + 600_000 })
   response.setHeader('Set-Cookie', cookie('github_ocean_oauth_state', state, 600))
   await event('login_started', { path: request.path })
-  const callback = `${process.env.API_ORIGIN ?? 'http://localhost:3001'}/api/auth/callback`
+  const callback = `${(process.env.API_ORIGIN ?? 'http://localhost:3001').replace(/\/+$/, '')}/api/auth/callback`
   response.redirect(`https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callback)}&scope=read%3Auser&state=${state}`)
 })
 app.get('/api/auth/callback', async (request, response) => {
@@ -79,7 +79,7 @@ app.get('/api/auth/callback', async (request, response) => {
     const session = signToken<Session>({ login: user.login, avatarUrl: user.avatar_url, exp: Date.now() + 7 * 86_400_000 })
     response.setHeader('Set-Cookie', [cookie('github_ocean_oauth_state', '', 0), cookie('github_ocean_session', session, 7 * 86_400)])
     await event('login_succeeded', { githubLogin: user.login, path: request.path })
-    response.redirect(`${process.env.WEB_ORIGIN ?? 'http://localhost:5173'}?github=${encodeURIComponent(user.login)}`)
+    response.redirect(`${(process.env.WEB_ORIGIN ?? 'http://localhost:5173').replace(/\/+$/, '')}?github=${encodeURIComponent(user.login)}`)
   } catch (error) { response.status(502).send(error instanceof Error ? error.message : 'Falha ao entrar com GitHub.') }
 })
 app.get('/api/auth/me', (request, response) => { const session = sessionFor(request.headers.cookie); response.json({ user: session ? { login: session.login, avatarUrl: session.avatarUrl } : null }) })
