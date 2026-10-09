@@ -68,7 +68,10 @@ app.get('/api/auth/github', async (request, response) => {
 })
 app.get('/api/auth/callback', async (request, response) => {
   const { code, state } = request.query, storedState = readCookie(request.headers.cookie, 'github_ocean_oauth_state')
-  if (typeof code !== 'string' || typeof state !== 'string' || !storedState || !sameValue(state, storedState) || !verifyToken<OAuthState>(state)) return response.status(400).send('Login GitHub inválido ou expirado.')
+  if (typeof code !== 'string' || typeof state !== 'string') return response.status(400).send('O GitHub não retornou uma autorização válida. Tente entrar novamente.')
+  if (!storedState) return response.status(400).send('A confirmação de login expirou ou o navegador bloqueou o cookie temporário. Tente novamente em uma janela anônima.')
+  if (!sameValue(state, storedState)) return response.status(400).send('A confirmação de login não corresponde à solicitação original. Feche as abas antigas e tente novamente.')
+  if (!verifyToken<OAuthState>(state)) return response.status(400).send('A confirmação de login expirou. Inicie o login novamente e conclua-o em até 10 minutos.')
   try {
     const tokenResponse = await fetch('https://github.com/login/oauth/access_token', { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'github-ocean' }, body: JSON.stringify({ client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET, code }) })
     const token = await tokenResponse.json() as { access_token?: string; error?: string; error_description?: string }
